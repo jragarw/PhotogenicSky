@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Photogenic Sky Setup",
+        "description": "Enter your WeatherAPI.com credentials and the location you want to monitor.",
+        "data": {
+          "api_key": "API Key",
+          "location": "Location (e.g., city, zip code)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the WeatherAPI.com service. Check your location or network.",
+      "invalid_auth": "Invalid API Key. Please check and try again.",
+      "unknown": "An unknown error occurred."
+    },
+    "abort": {
+      "already_configured": "This location is already configured."
+    }
+  }
+}

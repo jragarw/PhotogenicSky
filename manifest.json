@@ -1,0 +1,11 @@
+{
+  "domain": "photogenic_sky",
+  "name": "Photogenic Sky",
+  "config_flow": true,
+  "documentation": "https://github.com/YOUR_GITHUB_USERNAME/ha-photogenic-sky",
+  "issue_tracker": "https://github.com/YOUR_GITHUB_USERNAME/ha-photogenic-sky/issues",
+  "codeowners": ["@YOUR_GITHUB_USERNAME"],
+  "version": "1.0.0",
+  "iot_class": "cloud_polling",
+  "requirements": ["aiohttp"]
+}

@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# Home Assistant
+.HA_VERSION
+deps/
