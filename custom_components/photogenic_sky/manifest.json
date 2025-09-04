@@ -2,9 +2,9 @@
   "domain": "photogenic_sky",
   "name": "Photogenic Sky",
   "config_flow": true,
-  "documentation": "https://github.com/YOUR_GITHUB_USERNAME/ha-photogenic-sky",
-  "issue_tracker": "https://github.com/YOUR_GITHUB_USERNAME/ha-photogenic-sky/issues",
-  "codeowners": ["@YOUR_GITHUB_USERNAME"],
+  "documentation": "https://github.com/jragarw/PhotogenicSky/",
+  "issue_tracker": "https://github.com/jragarw/PhotogenicSky/issues",
+  "codeowners": ["@jragarw"],
   "version": "1.0.0",
   "iot_class": "cloud_polling",
   "requirements": ["aiohttp"]
