@@ -5,11 +5,10 @@ import aiohttp
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_LOCATION
+from .const import DOMAIN, CONF_LOCATION_NAME
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=15)
@@ -20,19 +19,28 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform from a config entry."""
-    # The API key and location from the config are now ignored,
-    # as we use HA's location and Open-Meteo (no key required).
-    # We pass hass to the sensor to get lat/lon and sun state.
-    async_add_entities([PhotogenicSkySensor(hass, config_entry.entry_id, config_entry.title)], True)
+    # Extract the stored location data from the config entry
+    location_data = config_entry.data
+    latitude = location_data["latitude"]
+    longitude = location_data["longitude"]
+    location_name = location_data[CONF_LOCATION_NAME]
+    
+    async_add_entities([PhotogenicSkySensor(hass, latitude, longitude, location_name, config_entry.entry_id)], True)
 
 class PhotogenicSkySensor(SensorEntity):
     """Representation of a Photogenic Sky Sensor."""
 
-    def __init__(self, hass: HomeAssistant, entry_id: str, location_name: str):
+    def __init__(self, hass: HomeAssistant, latitude: float, longitude: float, location_name: str, entry_id: str):
         """Initialize the sensor."""
         self.hass = hass
+        self._latitude = latitude
+        self._longitude = longitude
+        self._location_name = location_name
+        
+        # Use the full display name for the sensor's friendly name
         self._attr_name = f"Photogenic Sky {location_name}"
-        self._attr_unique_id = f"{entry_id}_{location_name.lower().replace(' ', '_')}"
+        # Make unique ID from the config entry ID to ensure it's stable and unique
+        self._attr_unique_id = entry_id
         self._attr_native_unit_of_measurement = "%"
         self._attr_icon = "mdi:camera-iris"
         self._photogenic_score = 0
@@ -51,8 +59,9 @@ class PhotogenicSkySensor(SensorEntity):
     async def async_update(self):
         """Fetch new state data for the sensor using Open-Meteo."""
         
-        lat = self.hass.config.latitude
-        lon = self.hass.config.longitude
+        # Use the stored latitude and longitude for this specific sensor instance
+        lat = self._latitude
+        lon = self._longitude
         
         params = (
             "&current=temperature_2m,relativehumidity_2m,apparent_temperature,"
@@ -74,9 +83,9 @@ class PhotogenicSkySensor(SensorEntity):
         # --- V6 ENGINE: CLOUD-TYPE AWARE SCORING ---
         
         sun_state = self.hass.states.get('sun.sun')
+        # Use Home Assistant's sun elevation which is location-aware
         sun_elevation = sun_state.attributes.get('elevation', 0) if sun_state else 0
 
-        # Extract data from the new API response structure
         current = data.get("current", {})
         daily = data.get("daily", {})
         
@@ -90,29 +99,22 @@ class PhotogenicSkySensor(SensorEntity):
         summary = ""
         lighting_condition = ""
 
-        # --- MODEL SELECTION BASED ON SUN ELEVATION & CLOUD TYPE ---
-
-        # 1. NIGHT MODEL (Astrophotography)
+        # MODEL SELECTION BASED ON SUN ELEVATION & CLOUD TYPE
         if sun_elevation < -6:
             lighting_condition = "Night"
             score = 100
             summary = "Night: "
-            # Any clouds are bad for astro
             score -= (cloud_low * 0.5) + (cloud_mid * 0.2) + (cloud_high * 0.1)
             if precip > 0: score -= 100
-            
             if score > 85: summary += "Excellent clear sky for astrophotography."
             else: summary += "Clouds are present, poor for astrophotography."
 
-        # 2. GOLDEN HOUR MODEL
         elif -4 <= sun_elevation < 6:
             lighting_condition = "Golden Hour"
             summary = "Golden Hour: "
-            # High, wispy clouds are the BEST. Low, thick clouds are the WORST.
-            score = 50  # Start from a baseline
-            score += cloud_high * 0.5  # Add up to 50 points for high clouds
-            score -= cloud_low * 0.8  # Subtract up to 80 points for low clouds
-            
+            score = 50
+            score += cloud_high * 0.5
+            score -= cloud_low * 0.8
             if cloud_high > 20 and cloud_low < 30:
                 summary += "Stunning sunset potential! High clouds are catching the light."
             elif cloud_low > 50:
@@ -120,20 +122,14 @@ class PhotogenicSkySensor(SensorEntity):
             else:
                 summary += "Decent conditions, but the clouds may not be ideal."
 
-        # 3. DAYTIME MODEL
-        else: # Covers Blue Hour and regular Daytime
+        else:
             lighting_condition = "Daytime"
             if -6 <= sun_elevation < -4:
                 lighting_condition = "Blue Hour"
             summary = f"{lighting_condition}: "
-            
             score = 100
-            # Low clouds are almost always bad
             score -= cloud_low * 0.7
-            # Mid-level clouds create drama, but too many is bad
-            if cloud_mid > 75:
-                score -= 25
-            
+            if cloud_mid > 75: score -= 25
             if cloud_low > 60:
                 summary += "Dull, overcast conditions due to a thick low cloud layer."
             elif cloud_mid > 20:
@@ -141,12 +137,12 @@ class PhotogenicSkySensor(SensorEntity):
             else:
                 summary += "Clear conditions, may result in harsh light."
 
-        # Clamp score and update all attributes
         self._photogenic_score = max(0, min(100, int(score)))
         self._api_data = {
             "photogenic_summary": summary,
             "lighting_condition": lighting_condition,
             "sun_elevation": round(sun_elevation, 2),
+            "location_name": self._location_name,
             
             "cloud_cover_low": f"{cloud_low}%",
             "cloud_cover_mid": f"{cloud_mid}%",

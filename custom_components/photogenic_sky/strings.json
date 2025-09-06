@@ -2,12 +2,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Photogenic Sky",
-        "description": "This will create a sensor that uses your Home Assistant's configured location to determine the photographic conditions.\n\nAre you sure you want to set up Photogenic Sky?"
+        "title": "Add a Photogenic Sky Location",
+        "description": "Enter a location to monitor. This can be a city, a postcode, or a specific place like 'Eiffel Tower'.",
+        "data": {
+          "location_name": "Location Name"
+        }
       }
     },
+    "error": {
+      "cannot_connect": "Unable to connect to the geocoding service.",
+      "location_not_found": "The specified location could not be found. Please try being more specific.",
+      "unknown": "An unknown error occurred."
+    },
     "abort": {
-      "single_instance_allowed": "Only one instance of Photogenic Sky is allowed."
+      "already_configured": "This location has already been configured."
     }
   }
 }

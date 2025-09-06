@@ -3,16 +3,16 @@ A smart weather sensor for photographers who care about the quality of light.
 
 This is not just another weather integration. Photogenic Sky is designed from the ground up to tell you not just what the weather is, but what that weather means for your photography. It analyzes cloud layers, the sun's position, and atmospheric conditions to produce a "Photogenic Score" and a human-readable summary, helping you decide if it's the right time to grab your camera.
 
-✨ Why Use Photogenic Sky?
-Standard weather reports can be misleading. 100% Cloud Cover could mean a beautiful sunset with high, wispy clouds, or it could mean a dull, gray day with a thick layer of low stratus clouds. This integration understands the difference.
+✨ Key Features
+Multi-Location Support: Monitor conditions at home, your favorite hiking spot, or your next travel destination, all at the same time.
 
-Cloud-Aware Scoring: Differentiates between high, mid, and low cloud layers.
+Cloud-Aware Scoring: Differentiates between high, wispy clouds (good for sunsets) and low, thick clouds (bad for light).
 
 Time & Light Aware: Uses separate scoring models for Golden Hour, Blue Hour, Daytime, and Night.
 
 Detailed Summary: Explains in plain English why conditions are good or bad.
 
-Zero Configuration: No API keys required! It uses your Home Assistant's location automatically.
+Zero API Keys Required: Uses the free and open Open-Meteo API without the need for any complex setup.
 
 🚀 Installation
 The recommended way to install is through the Home Assistant Community Store (HACS).
@@ -23,20 +23,18 @@ Go to HACS > Integrations.
 
 Click the three dots in the top-right corner and select Custom repositories.
 
-Add the URL for this repository and select the Integration category.
+Add the URL for this repository (https://github.com/jragarw/PhotogenicSky) and select the Integration category.
 
 Install the Integration:
 
-Search for "Photogenic Sky" in the HACS store.
-
-Click Install.
+Search for "Photogenic Sky" in the HACS store and click Install.
 
 Restart Home Assistant:
 
 Restart your Home Assistant instance as prompted by HACS.
 
 ⚙️ Configuration
-Configuration is handled entirely in the Home Assistant UI.
+You can add multiple locations, and each one will be its own independent sensor.
 
 In Home Assistant, go to Settings > Devices & Services.
 
@@ -44,52 +42,78 @@ Click the + ADD INTEGRATION button.
 
 Search for "Photogenic Sky" and select it.
 
-You will see a confirmation dialog. Click Submit.
+A dialog box will appear. Enter the name of the location you want to monitor (e.g., London, Yosemite National Park, or SW1A 0AA).
 
-That's it! A new sensor.photogenic_sky_your_location_name entity will be created, ready to be added to your dashboards.
+Click Submit. The integration will find the coordinates and create a new sensor.
 
-📊 Dashboard Examples
-To get the most out of this integration, use a custom card like button-card to display the dynamic data.
+Repeat for any other locations you wish to add.
+
+📊 Dashboard Example
+This integration provides a lot of data. The best way to see it all is with a standard Entities Card. This gives you a complete "at-a-glance" report for your chosen location.
 
 <details>
-<summary>Click to see the YAML for the recommended button-card</summary>
+<summary>Click to see the YAML for the recommended Entities Card</summary>
 
-type: custom:button-card
-entity: sensor.photogenic_sky_london #<-- Change to your entity
-name: Photography Conditions
-show_state: true
-state_display: '[[[ return states[entity.entity_id].state + "%" ]]]'
-icon: >
-  [[[
-    var condition = states[entity.entity_id].attributes.lighting_condition;
-    if (condition == 'Golden Hour') return 'mdi:weather-sunset';
-    if (condition == 'Blue Hour') return 'mdi:weather-night-partly-cloudy';
-    if (condition == 'Night') return 'mdi:moon-waning-crescent';
-    return 'mdi:weather-sunny';
-  ]]]
-styles:
-  card:
-    - padding: 12px
-  state:
-    - font-size: 28px
-    - font-weight: bold
-  name:
-    - font-size: 16px
-  label:
-    - font-size: 14px
-    - padding: 0 10px 10px 10px
-    - white-space: normal
-label: >
-  [[[
-    return states[entity.entity_id].attributes.photogenic_summary;
-  ]]]
-state:
-  - value: 85
-    operator: '>='
-    color: '#4CAF50' # Green
-  - value: 60
-    operator: '>='
-    color: '#FFC107' # Amber
-  - value: 0
-    operator: '>='
-    color: '#F44336' # Red
+type: entities
+title: Photogenic Report - Snowdonia
+show_header_toggle: false
+entities:
+  - entity: sensor.photogenic_sky_snowdonia_national_park #<-- Change to your entity
+    name: Photogenic Score
+
+  - type: section
+    label: Summary & Light
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: photogenic_summary
+    name: Summary
+    icon: mdi:text-long
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: lighting_condition
+    name: Lighting
+    icon: mdi:theme-light-dark
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: sun_elevation
+    name: Sun Elevation
+    icon: mdi:sun-angle
+
+  - type: section
+    label: Cloud Conditions
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: cloud_cover_high
+    name: High Clouds
+    icon: mdi:weather-cloudy-arrow-right
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: cloud_cover_mid
+    name: Mid Clouds
+    icon: mdi:weather-partly-cloudy
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: cloud_cover_low
+    name: Low Clouds
+    icon: mdi:weather-fog
+
+  - type: section
+    label: Planning Data
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: sunrise
+    name: Sunrise
+    icon: mdi:weather-sunset-up
+
+  - type: attribute
+    entity: sensor.photogenic_sky_snowdonia_national_park
+    attribute: sunset
+    name: Sunset
+    icon: mdi:weather-sunset-down
