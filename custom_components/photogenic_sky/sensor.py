@@ -22,8 +22,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     """Set up the sensor platform from a config entry."""
     if "latitude" not in config_entry.data or "longitude" not in config_entry.data:
         _LOGGER.warning(
-            "Legacy config entry found for '%s' with no coordinate data. "
-            "Please remove this location and re-add it to fix.",
+            "Legacy config entry for '%s' is missing coordinate data. "
+            "Please remove this location and re-add it.",
             config_entry.title
         )
         return
@@ -60,21 +60,17 @@ class PhotogenicSkySensor(SensorEntity):
     async def async_update(self):
         """Fetch new state data for the sensor using Open-Meteo."""
         
-        # --- PERMANENT URL FIX: Using a params dictionary ---
-        # This is the robust, industry-standard way to build a request.
-        # The library handles all the special characters and joining.
+        # --- DEFINITIVE URL FIX: Removed invalid 'timezone' parameter ---
         base_url = "https://api.open-meteo.com/v1/forecast"
         params = {
             "latitude": self._latitude,
             "longitude": self._longitude,
             "current": "temperature_2m,relativehumidity_2m,apparent_temperature,precipitation,weathercode,cloudcover,cloudcover_low,cloudcover_mid,cloudcover_high,windspeed_10m,winddirection_10m,uv_index",
             "daily": "sunrise,sunset,moonrise,moonset,moon_phase",
-            "timezone": "auto"
         }
         
         try:
             async with aiohttp.ClientSession() as session:
-                # The library will correctly build the full URL from the base and params
                 async with session.get(base_url, params=params) as response:
                     response.raise_for_status()
                     data = await response.json()
@@ -84,7 +80,7 @@ class PhotogenicSkySensor(SensorEntity):
             self._api_data["photogenic_summary"] = "Could not retrieve data from Open-Meteo."
             return
 
-        # (The rest of the file is identical to the previous version)
+        # (The rest of the file is identical)
         current = data.get("current", {})
         daily = data.get("daily", {})
         if not current or not daily:
