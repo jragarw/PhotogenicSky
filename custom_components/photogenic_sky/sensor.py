@@ -20,14 +20,12 @@ MOON_PHASE_ILLUMINATION = {
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the sensor platform from a config entry."""
-    # Gracefully handle legacy config entries that don't have coordinate data
     if "latitude" not in config_entry.data or "longitude" not in config_entry.data:
         _LOGGER.warning(
             "Legacy config entry found for '%s' with no coordinate data. "
             "Please remove this location and re-add it to fix.",
             config_entry.title
         )
-        # We cannot proceed without coordinates, so we don't add the entity.
         return
         
     latitude = config_entry.data["latitude"]
@@ -61,23 +59,23 @@ class PhotogenicSkySensor(SensorEntity):
 
     async def async_update(self):
         """Fetch new state data for the sensor using Open-Meteo."""
-        lat, lon = self._latitude, self._longitude
         
-        # --- CORRECTED URL CONSTRUCTION ---
-        # Defines parameters cleanly to prevent malformed URLs
-        current_params = "temperature_2m,relativehumidity_2m,apparent_temperature,precipitation,weathercode,cloudcover,cloudcover_low,cloudcover_mid,cloudcover_high,windspeed_10m,winddirection_10m,uv_index"
-        daily_params = "sunrise,sunset,moonrise,moonset,moon_phase"
-        
-        url = (
-            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-            f"&current={current_params}"
-            f"&daily={daily_params}"
-            f"&timezone=auto"
-        )
+        # --- PERMANENT URL FIX: Using a params dictionary ---
+        # This is the robust, industry-standard way to build a request.
+        # The library handles all the special characters and joining.
+        base_url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": self._latitude,
+            "longitude": self._longitude,
+            "current": "temperature_2m,relativehumidity_2m,apparent_temperature,precipitation,weathercode,cloudcover,cloudcover_low,cloudcover_mid,cloudcover_high,windspeed_10m,winddirection_10m,uv_index",
+            "daily": "sunrise,sunset,moonrise,moonset,moon_phase",
+            "timezone": "auto"
+        }
         
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+                # The library will correctly build the full URL from the base and params
+                async with session.get(base_url, params=params) as response:
                     response.raise_for_status()
                     data = await response.json()
         except Exception as err:
@@ -86,6 +84,7 @@ class PhotogenicSkySensor(SensorEntity):
             self._api_data["photogenic_summary"] = "Could not retrieve data from Open-Meteo."
             return
 
+        # (The rest of the file is identical to the previous version)
         current = data.get("current", {})
         daily = data.get("daily", {})
         if not current or not daily:
