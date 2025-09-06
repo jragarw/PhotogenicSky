@@ -2,21 +2,13 @@
   "config": {
     "step": {
       "user": {
-        "title": "Photogenic Sky Setup",
-        "description": "Enter your WeatherAPI.com credentials and the location you want to monitor.",
-        "data": {
-          "api_key": "API Key",
-          "location": "Location (e.g., city, zip code)"
-        }
+        "title": "Set up Photogenic Sky",
+        "description": "This will create a sensor that uses your Home Assistant's configured location to determine the photographic conditions.\n\nAre you sure you want to set up Photogenic Sky?"
       }
     },
-    "error": {
-      "cannot_connect": "Unable to connect to the WeatherAPI.com service. Check your location or network.",
-      "invalid_auth": "Invalid API Key. Please check and try again.",
-      "unknown": "An unknown error occurred."
-    },
     "abort": {
-      "already_configured": "This location is already configured."
+      "single_instance_allowed": "Only one instance of Photogenic Sky is allowed."
     }
   }
 }
+

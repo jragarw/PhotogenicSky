@@ -1,37 +1,95 @@
-# Photogenic Sky - Home Assistant Integration
+Photogenic Sky - Home Assistant Integration
+A smart weather sensor for photographers who care about the quality of light.
 
-This custom integration for Home Assistant provides a "Photogenic Score" sensor to help photographers know when local weather conditions are ideal for taking pictures. The "score" is a percentage based on factors like cloud cover, visibility, and wind.
+This is not just another weather integration. Photogenic Sky is designed from the ground up to tell you not just what the weather is, but what that weather means for your photography. It analyzes cloud layers, the sun's position, and atmospheric conditions to produce a "Photogenic Score" and a human-readable summary, helping you decide if it's the right time to grab your camera.
 
-The entire integration is configured through the Home Assistant user interface. No YAML editing is required.
+✨ Why Use Photogenic Sky?
+Standard weather reports can be misleading. 100% Cloud Cover could mean a beautiful sunset with high, wispy clouds, or it could mean a dull, gray day with a thick layer of low stratus clouds. This integration understands the difference.
 
+Cloud-Aware Scoring: Differentiates between high, mid, and low cloud layers.
 
+Time & Light Aware: Uses separate scoring models for Golden Hour, Blue Hour, Daytime, and Night.
 
-## Installation
+Detailed Summary: Explains in plain English why conditions are good or bad.
 
-### Recommended Method: HACS
+Zero Configuration: No API keys required! It uses your Home Assistant's location automatically.
 
-This is the easiest and recommended way to install.
+🚀 Installation
+The recommended way to install is through the Home Assistant Community Store (HACS).
 
-1.  Ensure you have [HACS (Home Assistant Community Store)](https://hacs.xyz/) installed.
-2.  In HACS, go to `Integrations` > Click the three dots in the top right > `Custom repositories`.
-3.  Add the URL to this GitHub repository (`https://github.com/YOUR_GITHUB_USERNAME/ha-photogenic-sky`) and select the `Integration` category.
-4.  You can now find the "Photogenic Sky" integration in the HACS store. Click `Install`.
-5.  Restart Home Assistant when prompted.
+Add this Repository to HACS:
 
-### Manual Method
+Go to HACS > Integrations.
 
-1.  Navigate to the `custom_components` directory in your Home Assistant configuration folder.
-2.  Copy the `photogenic_sky` directory from this repository into your `custom_components` directory.
-3.  Restart Home Assistant.
+Click the three dots in the top-right corner and select Custom repositories.
 
-## Configuration
+Add the URL for this repository and select the Integration category.
 
-1.  In Home Assistant, go to **Settings > Devices & Services**.
-2.  Click the **+ ADD INTEGRATION** button in the bottom right.
-3.  Search for **"Photogenic Sky"** and select it.
-4.  A configuration dialog will appear. 
-    -   Enter your **API Key** from WeatherAPI.com.
-    -   Enter the **Location** you want to monitor (e.g., `London` or a zip/post code).
-5.  Click **Submit**.
+Install the Integration:
 
-The integration will be set up, and you will have a new `sensor.photogenic_sky_your_location` entity ready to use!
+Search for "Photogenic Sky" in the HACS store.
+
+Click Install.
+
+Restart Home Assistant:
+
+Restart your Home Assistant instance as prompted by HACS.
+
+⚙️ Configuration
+Configuration is handled entirely in the Home Assistant UI.
+
+In Home Assistant, go to Settings > Devices & Services.
+
+Click the + ADD INTEGRATION button.
+
+Search for "Photogenic Sky" and select it.
+
+You will see a confirmation dialog. Click Submit.
+
+That's it! A new sensor.photogenic_sky_your_location_name entity will be created, ready to be added to your dashboards.
+
+📊 Dashboard Examples
+To get the most out of this integration, use a custom card like button-card to display the dynamic data.
+
+<details>
+<summary>Click to see the YAML for the recommended button-card</summary>
+
+type: custom:button-card
+entity: sensor.photogenic_sky_london #<-- Change to your entity
+name: Photography Conditions
+show_state: true
+state_display: '[[[ return states[entity.entity_id].state + "%" ]]]'
+icon: >
+  [[[
+    var condition = states[entity.entity_id].attributes.lighting_condition;
+    if (condition == 'Golden Hour') return 'mdi:weather-sunset';
+    if (condition == 'Blue Hour') return 'mdi:weather-night-partly-cloudy';
+    if (condition == 'Night') return 'mdi:moon-waning-crescent';
+    return 'mdi:weather-sunny';
+  ]]]
+styles:
+  card:
+    - padding: 12px
+  state:
+    - font-size: 28px
+    - font-weight: bold
+  name:
+    - font-size: 16px
+  label:
+    - font-size: 14px
+    - padding: 0 10px 10px 10px
+    - white-space: normal
+label: >
+  [[[
+    return states[entity.entity_id].attributes.photogenic_summary;
+  ]]]
+state:
+  - value: 85
+    operator: '>='
+    color: '#4CAF50' # Green
+  - value: 60
+    operator: '>='
+    color: '#FFC107' # Amber
+  - value: 0
+    operator: '>='
+    color: '#F44336' # Red

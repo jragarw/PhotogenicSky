@@ -1,12 +1,10 @@
 """Config flow for Photogenic Sky integration."""
 import logging
-import aiohttp
-import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_API_KEY
+from homeassistant.core import callback
 
-from .const import DOMAIN, CONF_LOCATION
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,44 +14,18 @@ class PhotogenicSkyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
-        errors = {}
+        """Handle the user step."""
+        # Check if an entry is already configured. We only allow one.
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
+
         if user_input is not None:
-            try:
-                await self._validate_api_key(user_input[CONF_API_KEY], user_input[CONF_LOCATION])
-                await self.async_set_unique_id(user_input[CONF_LOCATION].lower())
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=user_input[CONF_LOCATION], data=user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+            # User has confirmed. Create the entry.
+            # The title will be the location name from HA config.
+            # The data payload is empty as we don't need to store anything.
+            location_name = self.hass.config.location_name
+            return self.async_create_entry(title=location_name, data={})
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_API_KEY): str,
-                vol.Required(CONF_LOCATION): str,
-            }),
-            errors=errors,
-        )
+        # Show a simple confirmation form to the user.
+        return self.async_show_form(step_id="user")
 
-    async def _validate_api_key(self, api_key: str, location: str):
-        """Validate the API key by making a test call."""
-        url = f"http://api.weatherapi.com/v1/current.json?key={api_key}&q={location}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 401:
-                    raise InvalidAuth
-                if response.status >= 400:
-                    raise CannotConnect
-                return True
-
-class CannotConnect(Exception):
-    """Error to indicate we cannot connect."""
-
-class InvalidAuth(Exception):
-    """Error to indicate there is invalid auth."""
