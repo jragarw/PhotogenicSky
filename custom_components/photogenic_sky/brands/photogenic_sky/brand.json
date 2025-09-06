@@ -1,0 +1,8 @@
+{
+  "name": "Photogenic Sky",
+  "domain": "photogenic_sky",
+  "iot_class": "cloud_polling",
+  "documentation": "https://github.com/jragarw/PhotogenicSky",
+  "issue_tracker": "https://github.com/jragarw/PhotogenicSky/issues",
+  "logo": "https://brands.home-assistant.io/_/photogenic_sky/logo.png"
+}
