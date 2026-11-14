@@ -1,12 +1,13 @@
 """Config flow for Photogenic Sky integration."""
 import logging
+
 import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import DOMAIN, CONF_LOCATION_NAME
+from .const import CONF_LOCATION_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ async def _get_geocode(session: aiohttp.ClientSession, location_name: str) -> di
     """Get latitude and longitude from a location name using Nominatim."""
     url = "https://nominatim.openstreetmap.org/search"
     params = {'q': location_name, 'format': 'json', 'limit': 1}
-    headers = {"User-Agent": "PhotogenicSkyHA/2.1"}
+    headers = {"User-Agent": "PhotogenicSkyHA/3.0 (Home Assistant integration)"}
 
     async with session.get(url, params=params, headers=headers) as response:
         response.raise_for_status()
@@ -74,10 +75,28 @@ class PhotogenicSkyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 class PhotogenicSkyOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow."""
-    # This is empty for now, but provides the structure for future user settings.
+    """Configure bird outlook range, regional radius, and shoreline support."""
+
     def __init__(self, config_entry):
         self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("lookahead_days", default=options.get("lookahead_days", 7)):
+                        vol.In({7: "7 days", 14: "14 days"}),
+                    vol.Required("radius_km", default=options.get("radius_km", 25)):
+                        vol.In({10: "10 km", 25: "25 km", 50: "50 km"}),
+                    vol.Required("shoreline", default=options.get("shoreline", False)): bool,
+                }
+            ),
+        )
 
 class LocationNotFound(Exception):
     """Error to indicate the location could not be found."""
