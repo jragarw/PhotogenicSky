@@ -5,7 +5,6 @@
   "documentation": "https://github.com/jragarw/PhotogenicSky/",
   "issue_tracker": "https://github.com/jragarw/PhotogenicSky/issues",
   "codeowners": ["@jragarw"],
-  "version": "1.1.2",
-  "iot_class": "cloud_polling",
-  "requirements": ["aiohttp"]
+  "version": "3.0.0",
+  "iot_class": "cloud_polling"
 }

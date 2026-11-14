@@ -17,6 +17,35 @@
     "abort": {
       "already_configured": "This location has already been configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Photo planning options",
+        "description": "Choose the bird outlook period and search radius. Enable shoreline tide context for supported regions.",
+        "data": {
+          "lookahead_days": "Bird outlook period",
+          "radius_km": "Regional bird radius",
+          "shoreline": "Location is near the shoreline"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "photogenic_sky": {
+        "name": "Photogenic Sky score"
+      },
+      "birding_score": {
+        "name": "Birding score"
+      },
+      "bird_outlook": {
+        "name": "Regional bird outlook"
+      },
+      "tide_outlook": {
+        "name": "Shoreline tide outlook"
+      }
+    }
   }
 }
 

@@ -1,119 +1,28 @@
-Photogenic Sky - Home Assistant Integration
-A smart weather sensor for photographers who care about the quality of light.
+# Photogenic Sky
 
-This is not just another weather integration. Photogenic Sky is designed from the ground up to tell you not just what the weather is, but what that weather means for your photography. It analyzes cloud layers, the sun's position, and atmospheric conditions to produce a "Photogenic Score" and a human-readable summary, helping you decide if it's the right time to grab your camera.
+Photogenic Sky brings weather, birding, and shared light-quality guidance together for each saved Home Assistant location.
 
-✨ Key Features
-Multi-Location Support: Monitor conditions at home, your favorite hiking spot, or your next travel destination, all at the same time.
+## Features
 
-Cloud-Aware Scoring: Differentiates between high, wispy clouds (good for sunsets) and low, thick clouds (bad for light).
+- **Photogenic Sky score** ranks forecast sunrise, sunset, and midday windows using light, cloud cover, rain probability, and wind.
+- **Birding score** combines seasonal regional bird evidence, light quality, and weather suitability. The same soft dawn and dusk light that benefits photography contributes directly to this score; harsh overhead light receives a lower light score. Midday scores make that light tradeoff visible.
+- **Regional bird outlook** lists species recorded in the same upcoming calendar period in the previous five years, within a configurable 10, 25, or 50 km radius. Choose a 7- or 14-day period in the integration options.
+- **Shoreline tide outlook** can be enabled per location. Where a NOAA prediction station is within 100 km, the integration reports 30 days of high and low tides and shows rising/falling direction, the next tide turn, and nearby events for each forecast sunrise and sunset.
+- **14-day weather outlook** includes temperature, precipitation, wind, cloud cover, UV, sunrise, and sunset.
 
-Time & Light Aware: Uses separate scoring models for Golden Hour, Blue Hour, Daytime, and Night.
+Each configured location creates separate Photogenic Sky, Birding Score, and Regional Bird Outlook sensors. The Tide Outlook sensor appears when shoreline support is enabled. Data for different locations and providers remains independent: a bird or tide API outage does not invalidate a successful weather forecast.
 
-Detailed Summary: Explains in plain English why conditions are good or bad.
+## Data sources and limits
 
-Zero API Keys Required: Uses the free and open Open-Meteo API without the need for any complex setup.
+- Weather: [Open-Meteo](https://open-meteo.com/), free for non-commercial use without an API key. Review its terms and attribution requirements.
+- Seasonal bird evidence: [GBIF](https://www.gbif.org/developer/occurrence), a free public occurrence API with no key. The regional species list is historical evidence from matching dates in the preceding five years, not a true future migration forecast or a guarantee that any species will be present.
+- Tides: [NOAA Tides & Currents](https://tidesandcurrents.noaa.gov/api/), free for supported US stations. If no nearby station is found, or a location is outside NOAA coverage, tide data will be unavailable. UK and other non-US coverage is not provided by NOAA.
+- Location lookup: OpenStreetMap Nominatim.
 
-🚀 Installation
-The recommended way to install is through the Home Assistant Community Store (HACS).
+The birding score weights seasonal bird evidence at 55%, light quality at 30%, and weather suitability at 15%. Weather suitability accounts for rain, wind, and cloud cover. Photogenic Sky score combines light quality, cloud cover, and precipitation. These are planning guides, not guarantees. Sensor attributes expose the components and source coverage.
 
-Add this Repository to HACS:
+## Installation and setup
 
-Go to HACS > Integrations.
+Install through HACS as a custom integration using this repository, restart Home Assistant, and add **Photogenic Sky** under **Settings → Devices & services**. Enter a city, postcode, or place name. Open the integration's options to choose the 7- or 14-day bird outlook, regional search radius, and whether the location is near the shoreline.
 
-Click the three dots in the top-right corner and select Custom repositories.
-
-Add the URL for this repository (https://github.com/jragarw/PhotogenicSky) and select the Integration category.
-
-Install the Integration:
-
-Search for "Photogenic Sky" in the HACS store and click Install.
-
-Restart Home Assistant:
-
-Restart your Home Assistant instance as prompted by HACS.
-
-⚙️ Configuration
-You can add multiple locations, and each one will be its own independent sensor.
-
-In Home Assistant, go to Settings > Devices & Services.
-
-Click the + ADD INTEGRATION button.
-
-Search for "Photogenic Sky" and select it.
-
-A dialog box will appear. Enter the name of the location you want to monitor (e.g., London, Yosemite National Park, or SW1A 0AA).
-
-Click Submit. The integration will find the coordinates and create a new sensor.
-
-Repeat for any other locations you wish to add.
-
-📊 Dashboard Example
-This integration provides a lot of data. The best way to see it all is with a standard Entities Card. This gives you a complete "at-a-glance" report for your chosen location.
-
-<details>
-<summary>Click to see the YAML for the recommended Entities Card</summary>
-
-type: entities
-title: Photogenic Report - Snowdonia
-show_header_toggle: false
-entities:
-  - entity: sensor.photogenic_sky_snowdonia_national_park #<-- Change to your entity
-    name: Photogenic Score
-
-  - type: section
-    label: Summary & Light
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: photogenic_summary
-    name: Summary
-    icon: mdi:text-long
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: lighting_condition
-    name: Lighting
-    icon: mdi:theme-light-dark
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: sun_elevation
-    name: Sun Elevation
-    icon: mdi:sun-angle
-
-  - type: section
-    label: Cloud Conditions
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: cloud_cover_high
-    name: High Clouds
-    icon: mdi:weather-cloudy-arrow-right
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: cloud_cover_mid
-    name: Mid Clouds
-    icon: mdi:weather-partly-cloudy
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: cloud_cover_low
-    name: Low Clouds
-    icon: mdi:weather-fog
-
-  - type: section
-    label: Planning Data
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: sunrise
-    name: Sunrise
-    icon: mdi:weather-sunset-up
-
-  - type: attribute
-    entity: sensor.photogenic_sky_snowdonia_national_park
-    attribute: sunset
-    name: Sunset
-    icon: mdi:weather-sunset-down
+The integration refreshes its planning data every 12 hours. It requires no paid service or API key.
