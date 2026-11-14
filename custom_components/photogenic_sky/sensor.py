@@ -79,6 +79,8 @@ async def async_setup_entry(
     entities = [
         PhotogenicSkySensor(coordinator, location_name, config_entry.entry_id),
         BirdingSensor(coordinator, location_name, config_entry.entry_id),
+        ScoreDecisionSensor(coordinator, location_name, config_entry.entry_id, "photogenic"),
+        ScoreDecisionSensor(coordinator, location_name, config_entry.entry_id, "birding"),
         BirdOutlookSensor(coordinator, location_name, config_entry.entry_id),
     ]
     if shoreline:
@@ -205,7 +207,7 @@ async def _fetch_birds(session, latitude, longitude, timezone, radius_km, lookah
             "geometry": polygon,
             "eventDate": f"{start.isoformat()},{end.isoformat()}",
             "facet": "speciesKey",
-            "facetLimit": 100,
+            "facetLimit": 500,
             "limit": 0,
         }
         url = "https://api.gbif.org/v1/occurrence/search?" + urlencode(params)
@@ -225,6 +227,14 @@ async def _fetch_birds(session, latitude, longitude, timezone, radius_km, lookah
             record["records"] += species.get("count", 0)
             record["years_reported"] += 1
 
+    # Keep regional totals before limiting the display list. The old score was
+    # calculated from only the 12 names shown in the outlook, so busy regions
+    # all received the same capped bird-evidence score.
+    species_count = len(birds)
+    recurring_species_count = sum(
+        1 for item in birds.values() if item["years_reported"] >= 3
+    )
+    total_records = sum(item["records"] for item in birds.values())
     species_list = sorted(
         birds.values(),
         key=lambda item: (-item["years_reported"], -item["records"]),
@@ -239,6 +249,10 @@ async def _fetch_birds(session, latitude, longitude, timezone, radius_km, lookah
         species["common_name"] = detail.get("vernacularName")
     return {
         "species": species_list,
+        "species_count": species_count,
+        "species_count_may_be_capped": species_count == 500,
+        "recurring_species_count": recurring_species_count,
+        "total_records": total_records,
         "source": "GBIF occurrence search",
         "evidence_years": years_with_data,
         "window_days": lookahead_days,
@@ -344,9 +358,17 @@ def _build_opportunities(days, timezone, bird_data, hourly=None):
             if not time:
                 continue
             window_weather = _nearest_hour(hourly or {}, time)
-            light = _light_score(day, window, window_weather)
+            light_detail = _light_score_breakdown(day, window, window_weather)
+            light = light_detail["score"]
             sky = _sky_score(day, light, window_weather)
-            weather = _weather_suitability(day, window_weather)
+            weather_detail = _weather_suitability_breakdown(day, window_weather)
+            weather = weather_detail["score"]
+            photogenic_breakdown = _photogenic_score_breakdown(
+                day, light, window_weather
+            )
+            birding_breakdown = _birding_score_breakdown(
+                bird_data, light, weather
+            ) if within_bird_window and bird_data and bird_data["species"] else None
             birding = round(0.55 * species_factor + 0.30 * light + 0.15 * weather) \
                 if within_bird_window and bird_data["species"] else None
             opportunities.append({
@@ -355,12 +377,16 @@ def _build_opportunities(days, timezone, bird_data, hourly=None):
                 "birding_score": birding,
                 "seasonal_bird_score": species_factor if within_bird_window and bird_data["species"] else None,
                 "weather_suitability_score": weather,
+                "light_quality_breakdown": light_detail,
+                "weather_suitability_breakdown": weather_detail,
+                "photogenic_score_breakdown": photogenic_breakdown,
+                "birding_score_breakdown": birding_breakdown,
                 "condition": day["condition"],
                 "precipitation_probability_max": day["precipitation_probability_max"],
                 "wind_speed_kmh": day["wind_speed_kmh"],
                 "conditions_at_window": window_weather,
                 "cloud_cover_mean": day["cloud_cover_mean"],
-                "seasonal_bird_species_count": len(bird_data["species"]) if bird_data else None,
+                "seasonal_bird_species_count": bird_data.get("species_count", len(bird_data["species"])) if bird_data else None,
             })
     opportunities.sort(key=lambda item: (-(item["birding_score"] or 0), item["time"]))
     return opportunities
@@ -369,13 +395,88 @@ def _build_opportunities(days, timezone, bird_data, hourly=None):
 def _species_score(bird_data):
     if not bird_data or not bird_data["species"]:
         return 0
-    # Favor recurring seasonal records while capping raw citizen-science volume.
-    recurring = sum(1 for item in bird_data["species"] if item["years_reported"] >= 3)
-    return min(100, round(40 + recurring * 2))
+    # Measure regional richness from every returned species, not the 12-name
+    # display sample. Historical year coverage tempers locations with sparse data.
+    species_count = bird_data.get("species_count", len(bird_data["species"]))
+    evidence_years = bird_data.get("evidence_years", 0)
+    richness = min(100, round(100 * math.log1p(species_count) / math.log1p(500)))
+    seasonal_coverage = min(100, round(evidence_years / 5 * 100))
+    return round(0.70 * richness + 0.30 * seasonal_coverage)
 
 
-def _light_score(day, window, conditions=None):
-    """Dawn and dusk are favorable; harsh midday light lowers the shared light score."""
+def _photogenic_score_breakdown(day, light, conditions=None):
+    conditions = conditions or {}
+    cloud = conditions.get("cloud_cover")
+    cloud = cloud if cloud is not None else day["cloud_cover_mean"]
+    cloud = cloud if cloud is not None else 50
+    rain = conditions.get("precipitation_probability")
+    rain = rain if rain is not None else day["precipitation_probability_max"]
+    rain = rain if rain is not None else 20
+    light_contribution = round(0.55 * light, 1)
+    clear_sky_contribution = round(0.30 * (100 - cloud), 1)
+    dry_weather_contribution = round(0.15 * (100 - rain), 1)
+    return {
+        "formula": "55% light quality + 30% clear sky + 15% low rain probability",
+        "light_quality_score": light,
+        "light_quality_contribution": light_contribution,
+        "cloud_cover_percent": cloud,
+        "clear_sky_contribution": clear_sky_contribution,
+        "precipitation_probability_percent": rain,
+        "dry_weather_contribution": dry_weather_contribution,
+        "calculated_score": _sky_score(day, light, conditions),
+    }
+
+
+def _birding_score_breakdown(bird_data, light, weather):
+    seasonal = _species_score(bird_data)
+    return {
+        "formula": "55% seasonal bird evidence + 30% light quality + 15% weather suitability",
+        "seasonal_bird_score": seasonal,
+        "seasonal_bird_contribution": round(0.55 * seasonal, 1),
+        "light_quality_score": light,
+        "light_quality_contribution": round(0.30 * light, 1),
+        "weather_suitability_score": weather,
+        "weather_suitability_contribution": round(0.15 * weather, 1),
+        "calculated_score": round(0.55 * seasonal + 0.30 * light + 0.15 * weather),
+        "bird_species_count_in_region": bird_data.get(
+            "species_count", len(bird_data["species"])
+        ),
+        "recurring_species_count": bird_data.get("recurring_species_count"),
+        "historical_evidence_years": bird_data.get("evidence_years"),
+        "historical_window_days": bird_data.get("window_days"),
+        "search_radius_km": bird_data.get("radius_km"),
+    }
+
+
+def _decision_text(product, opportunity):
+    if not opportunity:
+        return f"{product} score is unavailable: no matching forecast opportunity."
+    score_key = "photogenic_sky_score" if product == "Photogenic sky" else "birding_score"
+    score = opportunity.get(score_key)
+    if score is None:
+        return f"{product} score is unavailable: no seasonal bird evidence was found."
+    quality = "excellent" if score >= 80 else "good" if score >= 65 else "mixed" if score >= 45 else "poor"
+    window = opportunity["window"]
+    date_value = opportunity["date"]
+    if product == "Photogenic sky":
+        detail = opportunity["photogenic_score_breakdown"]
+        return (
+            f"{score}/100, {quality}; best at {window} on {date_value}. "
+            f"Light {detail['light_quality_score']}/100, "
+            f"cloud {detail['cloud_cover_percent']}%, "
+            f"rain chance {detail['precipitation_probability_percent']}%."
+        )
+    detail = opportunity["birding_score_breakdown"]
+    return (
+        f"{score}/100, {quality}; best at {window} on {date_value}. "
+        f"Seasonal evidence {detail['seasonal_bird_score']}/100, "
+        f"light {detail['light_quality_score']}/100, "
+        f"weather {detail['weather_suitability_score']}/100."
+    )
+
+
+def _light_score_breakdown(day, window, conditions=None):
+    """Return the light score and every adjustment applied to it."""
     conditions = conditions or {}
     cloud = conditions.get("cloud_cover")
     cloud = cloud if cloud is not None else day["cloud_cover_mean"]
@@ -390,9 +491,36 @@ def _light_score(day, window, conditions=None):
     wind_penalty = min(wind, 80) * 0.15
     if window == "midday":
         cloud_modifier = min(cloud, 100) * 0.25
+        cloud_detail = {"total_cloud_cover_percent": cloud}
     else:
         cloud_modifier = min(high_cloud, 100) * 0.12 - min(low_cloud, 100) * 0.35
-    return max(0, min(100, round(base + cloud_modifier - precipitation * 0.25 - wind_penalty)))
+        cloud_detail = {
+            "low_cloud_cover_percent": low_cloud,
+            "high_cloud_cover_percent": high_cloud,
+        }
+    cloud_adjustment = round(cloud_modifier, 1)
+    rain_penalty = round(precipitation * 0.25, 1)
+    raw_score = base + cloud_modifier - rain_penalty - wind_penalty
+    return {
+        "score": max(0, min(100, round(raw_score))),
+        "formula": "window base + cloud adjustment - 0.25 x rain probability - 0.15 x capped wind speed",
+        "window": window,
+        "window_base": base,
+        **cloud_detail,
+        "cloud_adjustment": cloud_adjustment,
+        "precipitation_probability_percent": precipitation,
+        "precipitation_penalty": rain_penalty,
+        "wind_speed_kmh": wind,
+        "wind_speed_used_for_penalty_kmh": min(wind, 80),
+        "wind_penalty_cap_kmh": 80,
+        "wind_penalty": round(wind_penalty, 1),
+        "uncapped_score": round(raw_score, 1),
+    }
+
+
+def _light_score(day, window, conditions=None):
+    """Dawn and dusk are favorable; harsh midday light lowers the shared light score."""
+    return _light_score_breakdown(day, window, conditions)["score"]
 
 
 def _sky_score(day, light, conditions=None):
@@ -404,15 +532,38 @@ def _sky_score(day, light, conditions=None):
     return max(0, min(100, round(0.55 * light + 0.30 * (100 - cloud) + 0.15 * (100 - rain))))
 
 
-def _weather_suitability(day, conditions=None):
+def _weather_suitability_breakdown(day, conditions=None):
     conditions = conditions or {}
     cloud = conditions.get("cloud_cover", day["cloud_cover_mean"])
     cloud = cloud if cloud is not None else 50
     rain = conditions.get("precipitation_probability", day["precipitation_probability_max"])
     rain = rain if rain is not None else 25
     wind = conditions.get("wind_speed_kmh", day["wind_speed_kmh"]) or 0
+    rain_score = max(0, 100 - rain)
     wind_score = max(0, 100 - min(wind, 100))
-    return max(0, min(100, round(0.45 * (100 - rain) + 0.30 * wind_score + 0.25 * (100 - cloud))))
+    cloud_score = max(0, 100 - cloud)
+    contributions = {
+        "rain_contribution": round(0.45 * rain_score, 1),
+        "wind_contribution": round(0.30 * wind_score, 1),
+        "cloud_contribution": round(0.25 * cloud_score, 1),
+    }
+    return {
+        "formula": "45% low rain probability + 30% low wind + 25% low cloud cover",
+        "precipitation_probability_percent": rain,
+        "rain_score": rain_score,
+        "wind_speed_kmh": wind,
+        "wind_score": wind_score,
+        "cloud_cover_percent": cloud,
+        "cloud_score": cloud_score,
+        **contributions,
+        "score": max(0, min(100, round(
+            0.45 * rain_score + 0.30 * wind_score + 0.25 * cloud_score
+        ))),
+    }
+
+
+def _weather_suitability(day, conditions=None):
+    return _weather_suitability_breakdown(day, conditions)["score"]
 
 
 def _nearest_hour(hourly, local_time):
@@ -499,11 +650,15 @@ class PhotogenicSkySensor(PlanningSensor):
 
     @property
     def extra_state_attributes(self):
-        return _common_attributes(self.coordinator.data) | {
-            "weather_forecast": self.coordinator.data["weather"]["days"] if self.coordinator.data["weather"] else [],
-            "best_opportunity": _best(self.coordinator.data["opportunities"], "photogenic_sky_score"),
-            "opportunities": self.coordinator.data["opportunities"],
-            "score_note": "Forecast guide from daylight, cloud cover, rain probability, and wind; not a guarantee of conditions.",
+        data = self.coordinator.data
+        best = _best(data["opportunities"], "photogenic_sky_score")
+        return _common_attributes(data) | {
+            "weather_forecast": data["weather"]["days"] if data["weather"] else [],
+            "best_opportunity": best,
+            "score_breakdown": best["photogenic_score_breakdown"] if best else None,
+            "decision": _decision_text("Photogenic sky", best),
+            "opportunities": data["opportunities"],
+            "score_note": "Forecast guide from light quality, cloud cover, and rain probability; not a guarantee. Rounded scores can match across locations; compare coordinates and component inputs.",
         }
 
 
@@ -536,15 +691,68 @@ class BirdingSensor(PlanningSensor):
     @property
     def extra_state_attributes(self):
         data = self.coordinator.data
+        best = _best(data["opportunities"], "birding_score")
         return _common_attributes(data) | {
-            "best_birding_opportunity": _best(data["opportunities"], "birding_score"),
+            "best_birding_opportunity": best,
+            "score_breakdown": best["birding_score_breakdown"] if best else None,
+            "decision": _decision_text("Birding", best),
             "opportunities": data["opportunities"],
             "bird_species": data["birds"]["species"] if data["birds"] else [],
             "seasonal_bird_score": _species_score(data["birds"]),
+            "seasonal_bird_evidence": _bird_evidence_attributes(data["birds"]),
             "lookahead_days": data["lookahead_days"],
             "score_formula": "55% seasonal regional species evidence, 30% light quality, 15% weather suitability",
-            "score_note": "Seasonal occurrence history is not a prediction that birds will be present on a particular day.",
+            "score_note": "Seasonal occurrence history is not a prediction that birds will be present on a particular day. Rounded scores can match across locations; compare coordinates and evidence counts.",
         }
+
+
+class ScoreDecisionSensor(PlanningSensor):
+    """Readable score decision plus the inputs used for its best window."""
+
+    _attr_icon = "mdi:text-box-check-outline"
+
+    def __init__(self, coordinator, location_name, entry_id, product):
+        super().__init__(coordinator, location_name, entry_id)
+        self.product = product
+        self._attr_translation_key = f"{product}_decision"
+        self._attr_unique_id = f"{entry_id}_{product}_decision"
+
+    @property
+    def available(self):
+        return super().available and self.coordinator.data["weather"] is not None
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data
+        score_key = "photogenic_sky_score" if self.product == "photogenic" else "birding_score"
+        best = _best(data["opportunities"], score_key)
+        if self.product == "birding" and data["birds"] is None:
+            return "Birding score unavailable: regional bird data could not be retrieved."
+        if self.product == "birding" and not data["birds"]["species"]:
+            return "No historical seasonal bird records were found in this region."
+        return _decision_text("Photogenic sky" if self.product == "photogenic" else "Birding", best)
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data
+        score_key = "photogenic_sky_score" if self.product == "photogenic" else "birding_score"
+        best = _best(data["opportunities"], score_key)
+        breakdown_key = "photogenic_score_breakdown" if self.product == "photogenic" else "birding_score_breakdown"
+        attributes = {
+            **_common_attributes(data),
+            "decision": self.native_value,
+            "score": best.get(score_key) if best else None,
+            "selected_opportunity": best,
+            "score_breakdown": best.get(breakdown_key) if best else None,
+            "formula": (
+                "55% light quality + 30% clear sky + 15% low rain probability"
+                if self.product == "photogenic"
+                else "55% seasonal bird evidence + 30% light quality + 15% weather suitability"
+            ),
+        }
+        if self.product == "birding":
+            attributes["seasonal_bird_evidence"] = _bird_evidence_attributes(data["birds"])
+        return attributes
 
 
 class BirdOutlookSensor(PlanningSensor):
@@ -564,7 +772,7 @@ class BirdOutlookSensor(PlanningSensor):
     @property
     def native_value(self):
         birds = self.coordinator.data["birds"]
-        return len(birds["species"]) if birds else None
+        return birds.get("species_count", len(birds["species"])) if birds else None
 
     @property
     def extra_state_attributes(self):
@@ -618,10 +826,41 @@ class TideSensor(PlanningSensor):
 def _common_attributes(data):
     return {
         "location": data["location"],
+        "latitude": data["location"]["latitude"],
+        "longitude": data["location"]["longitude"],
         "lookahead_days": data["lookahead_days"],
         "weather_source": data["weather"]["source"] if data["weather"] else "unavailable",
         "bird_data_source": data["birds"]["source"] if data["birds"] else "unavailable",
         "updated_at": data.get("updated_at"),
+    }
+
+
+def _bird_evidence_attributes(bird_data):
+    if bird_data is None:
+        return {"status": "unavailable"}
+    species_count = bird_data.get("species_count", len(bird_data["species"]))
+    evidence_years = bird_data.get("evidence_years", 0)
+    richness_score = min(100, round(100 * math.log1p(species_count) / math.log1p(500)))
+    seasonal_coverage_score = min(100, round(evidence_years / 5 * 100))
+    return {
+        "status": bird_data.get("status", "unknown"),
+        "score_formula": "70% log-scaled regional species richness (0-500) + 30% historical year coverage",
+        "score": _species_score(bird_data),
+        "regional_species_count": species_count,
+        "species_count_may_be_capped": bird_data.get("species_count_may_be_capped", False),
+        "displayed_species_count": len(bird_data["species"]),
+        "recurring_species_count": bird_data.get("recurring_species_count"),
+        "total_historical_records": bird_data.get("total_records"),
+        "historical_years_with_records": evidence_years,
+        "years_searched": 5,
+        "richness_score": richness_score,
+        "richness_contribution": round(0.70 * richness_score, 1),
+        "seasonal_coverage_score": seasonal_coverage_score,
+        "seasonal_coverage_contribution": round(0.30 * seasonal_coverage_score, 1),
+        "search_radius_km": bird_data.get("radius_km"),
+        "window_days": bird_data.get("window_days"),
+        "data_source": bird_data.get("source"),
+        "note": "GBIF historical occurrences for matching calendar dates in the previous five years; not a live bird count or forecast.",
     }
 
 
