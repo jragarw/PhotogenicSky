@@ -50,6 +50,12 @@
       },
       "birding_decision": {
         "name": "Birding decision"
+      },
+      "lighting": {
+        "name": "Current lighting and cloud layers"
+      },
+      "astro_score": {
+        "name": "Astrophotography score"
       }
     }
   }
