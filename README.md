@@ -10,7 +10,9 @@ Photogenic Sky brings weather, birding, and shared light-quality guidance togeth
 - **Shoreline tide outlook** can be enabled per location. Where a NOAA prediction station is within 100 km, the integration reports 30 days of high and low tides and shows rising/falling direction, the next tide turn, and nearby events for each forecast sunrise and sunset.
 - **14-day weather outlook** includes temperature, precipitation, wind, cloud cover, UV, sunrise, and sunset.
 
-Each configured location creates separate Photogenic Sky, Birding Score, and Regional Bird Outlook sensors. The Tide Outlook sensor appears when shoreline support is enabled. Data for different locations and providers remains independent: a bird or tide API outage does not invalidate a successful weather forecast.
+Each configured location creates separate Photogenic Sky, Birding Score, Photogenic Decision, Birding Decision, and Regional Bird Outlook sensors. The Tide Outlook sensor appears when shoreline support is enabled. Data for different locations and providers remains independent: a bird or tide API outage does not invalidate a successful weather forecast. The Regional Bird Outlook state is the full regional species count; its attributes list the leading 12 species.
+
+Open either score sensor's **More info** panel to inspect its `score_breakdown`, selected forecast window, raw local weather inputs, coordinates, and `decision` text. The two Decision sensors expose the same information in a readable entity state and include formula contributions in their attributes. The birding details also report total species found, recurring species, historical record count, years with records, lookahead period, and search radius. This makes it possible to inspect why locations differ—or verify when rounded scores happen to match—and build dashboard cards from the Decision sensors and their attributes.
 
 ## Data sources and limits
 
@@ -19,7 +21,7 @@ Each configured location creates separate Photogenic Sky, Birding Score, and Reg
 - Tides: [NOAA Tides & Currents](https://tidesandcurrents.noaa.gov/api/), free for supported US stations. If no nearby station is found, or a location is outside NOAA coverage, tide data will be unavailable. UK and other non-US coverage is not provided by NOAA.
 - Location lookup: OpenStreetMap Nominatim.
 
-The birding score weights seasonal bird evidence at 55%, light quality at 30%, and weather suitability at 15%. Weather suitability accounts for rain, wind, and cloud cover. Photogenic Sky score combines light quality, cloud cover, and precipitation. These are planning guides, not guarantees. Sensor attributes expose the components and source coverage.
+The birding score weights seasonal bird evidence at 55%, light quality at 30%, and weather suitability at 15%. Seasonal evidence is 70% log-scaled regional species richness and 30% coverage across five historical years; the full species count is used, not just the 12 species displayed by name. The count query requests up to 500 species facets and marks when that limit may have been reached. Weather suitability weights low rain 45%, low wind 30%, and low cloud 25%. Photogenic Sky score weights light quality 55%, clear sky 30%, and low rain probability 15%. Light quality starts higher at sunrise and sunset than midday, then adjusts for cloud layers, rain probability, and wind. These are planning guides, not guarantees.
 
 ## Installation and setup
 
