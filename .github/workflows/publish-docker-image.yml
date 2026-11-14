@@ -48,7 +48,3 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.app.outputs.version }}
-      - name: Make the image available for unauthenticated pulls
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api --method PATCH /user/packages/container/photogenic-sky --field visibility=public

@@ -16,7 +16,7 @@ Create that directory or dataset first and grant write access to UID/GID `568` (
 
 Open `http://<truenas-host>:8080` and add locations in the browser. When a new image is published, use Dockge’s **Pull** / **Redeploy** action to fetch and start it. The Compose file uses `pull_policy: always`, so a compose up also checks GHCR for the latest image. Do not remove the data directory when updating the image.
 
-The image is built from `docker-app/` and published to GHCR whenever app files are merged to `main`. It is tagged `latest` and with the app version from `VERSION`; bump that file for a versioned update. There is no API key or paid data provider.
+The image is built from `docker-app/` and published to GHCR whenever app files are merged to `main`. It is tagged `latest` and with the app version from `VERSION`; bump that file for a versioned update. The first publish is private by default: set the package visibility to **Public** in the repository’s Packages settings so TrueNAS can pull without registry credentials. There is no API key or paid data provider.
 
 For local source development, use `docker compose -f compose.dev.yaml up --build` instead; that file builds from the checkout and stores data in a named volume.
 
