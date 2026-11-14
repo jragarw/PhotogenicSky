@@ -24,7 +24,7 @@ DAILY_FIELDS = ",".join((
     "weather_code", "temperature_2m_max", "temperature_2m_min",
     "precipitation_probability_max", "precipitation_sum", "wind_speed_10m_max",
     "cloud_cover_mean",
-    "sunrise", "sunset", "uv_index_max",
+    "sunrise", "sunset", "uv_index_max", "moonrise", "moonset", "moon_phase", "daylight_duration",
 ))
 HOURLY_FIELDS = ",".join((
     "cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high",
@@ -78,6 +78,8 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
     entities = [
         PhotogenicSkySensor(coordinator, location_name, config_entry.entry_id),
+        LightingSensor(coordinator, location_name, config_entry.entry_id),
+        AstroSensor(coordinator, location_name, config_entry.entry_id),
         BirdingSensor(coordinator, location_name, config_entry.entry_id),
         ScoreDecisionSensor(coordinator, location_name, config_entry.entry_id, "photogenic"),
         ScoreDecisionSensor(coordinator, location_name, config_entry.entry_id, "birding"),
@@ -96,8 +98,9 @@ async def _async_update_data(
         session, latitude, longitude, timezone, lookahead_days, radius_km, shoreline
     )
     location_timezone = weather["timezone"] if weather else timezone
+    lighting = _lighting_state(weather, latitude, longitude) if weather else None
     opportunities = (
-        _build_opportunities(weather["days"], location_timezone, birds, weather["hourly"])
+        _build_opportunities(weather["days"], location_timezone, birds, weather["hourly"], lighting)
         if weather else []
     )
     return {
@@ -105,6 +108,7 @@ async def _async_update_data(
         "birds": birds,
         "tides": tides,
         "opportunities": opportunities,
+        "lighting": lighting,
         "location": {"latitude": latitude, "longitude": longitude},
         "lookahead_days": lookahead_days,
         "updated_at": weather.get("updated_at") if weather else None,
@@ -150,6 +154,7 @@ async def _fetch_weather(session, latitude, longitude, timezone, forecast_days):
             "longitude": longitude,
             "daily": DAILY_FIELDS,
             "hourly": HOURLY_FIELDS,
+            "current": "cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high",
             "timezone": timezone,
             "forecast_days": forecast_days,
         },
@@ -171,12 +176,17 @@ async def _fetch_weather(session, latitude, longitude, timezone, forecast_days):
             "wind_speed_kmh": _at(daily, "wind_speed_10m_max", index),
             "cloud_cover_mean": _at(daily, "cloud_cover_mean", index),
             "uv_index_max": _at(daily, "uv_index_max", index),
+            "moonrise": _at(daily, "moonrise", index),
+            "moonset": _at(daily, "moonset", index),
+            "moon_phase": _at(daily, "moon_phase", index),
+            "daylight_duration_seconds": _at(daily, "daylight_duration", index),
             "sunrise": _at(daily, "sunrise", index),
             "sunset": _at(daily, "sunset", index),
         })
     return {
         "days": days,
         "hourly": hourly,
+        "current": payload.get("current", {}),
         "timezone": payload.get("timezone", timezone),
         "source": "Open-Meteo",
         "updated_at": datetime.now(dt_timezone.utc).isoformat(),
@@ -291,7 +301,34 @@ def _radius_polygon(latitude, longitude, radius_km):
 
 
 async def _fetch_tides(session, latitude, longitude, timezone):
-    """Fetch 30-day tide events from the free NOAA API where covered."""
+    """Fetch free 30-day tide events from Open Waters."""
+    from urllib.parse import urlencode
+    from zoneinfo import ZoneInfo
+
+    start = datetime.now(ZoneInfo(timezone)).astimezone(dt_timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=30)
+    url = "https://api.openwaters.io/tides/extremes?" + urlencode({
+        "latitude": latitude, "longitude": longitude,
+        "start": start.isoformat().replace("+00:00", "Z"),
+        "end": end.isoformat().replace("+00:00", "Z"), "units": "meters",
+    })
+    payload = await _json_get(session, url)
+    station = payload.get("station", {})
+    events = [{
+        "time": item["time"], "height_m": item.get("level"),
+        "type": "high" if item.get("high") else "low",
+    } for item in payload.get("extremes", []) if item.get("time")]
+    if events:
+        return {
+            "status": "available", "source": "Open Waters (TICON-4)",
+            "station": station.get("name"), "station_id": station.get("id"),
+            "station_distance_km": payload.get("distance"), "datum": payload.get("datum"),
+            "units": payload.get("units", "meters"), "timezone": station.get("timezone", timezone), "events": events,
+            "attribution": "Open Waters tide predictions, CC BY 4.0",
+            "note": station.get("disclaimers") or "Harmonic predictions; verify local datum and station suitability. Not for navigation.",
+        }
+    # NOAA fallback retained for US stations.
+
     stations = await _json_get(
         session, "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions"
     )
@@ -329,7 +366,7 @@ async def _fetch_tides(session, latitude, longitude, timezone):
     return {
         "status": "available", "source": "NOAA Tides & Currents",
         "station": station["name"], "station_id": station["id"],
-        "station_distance_km": round(distance, 1), "events": events,
+        "station_distance_km": round(distance, 1), "timezone": timezone, "events": events,
         "note": "NOAA coverage is limited to US stations. Verify local datum and station suitability.",
     }
 
@@ -342,53 +379,100 @@ def _distance_km(lat1, lon1, lat2, lon2):
     return 6371 * 2 * asin(sqrt(a))
 
 
-def _build_opportunities(days, timezone, bird_data, hourly=None):
+def _lighting_state(weather, latitude, longitude):
+    """Calculate current solar phase independently for each configured location."""
+    from zoneinfo import ZoneInfo
+    local_now = datetime.now(ZoneInfo(weather["timezone"]))
+    elevation = _solar_elevation(local_now, latitude, longitude)
+    phase = "daylight" if elevation > 6 else "golden_hour" if elevation > -0.833 else "blue_hour" if elevation > -6 else "night"
+    current = weather.get("current", {})
+    return {"phase": phase, "solar_elevation_degrees": round(elevation, 2), "latitude": latitude, "longitude": longitude, "observed_at": local_now.isoformat(),
+            "cloud_cover_percent": current.get("cloud_cover"), "low_cloud_cover_percent": current.get("cloud_cover_low"),
+            "mid_cloud_cover_percent": current.get("cloud_cover_mid"), "high_cloud_cover_percent": current.get("cloud_cover_high")}
+
+
+def _solar_elevation(local_time, latitude, longitude):
+    """Approximate solar elevation using NOAA fractional-year equations."""
+    day = local_time.timetuple().tm_yday
+    hour = local_time.hour + local_time.minute / 60 + local_time.second / 3600
+    gamma = 2 * math.pi / 365 * (day - 1 + (hour - 12) / 24)
+    eqtime = 229.18 * (0.000075 + 0.001868 * math.cos(gamma) - 0.032077 * math.sin(gamma) - 0.014615 * math.cos(2*gamma) - 0.040849 * math.sin(2*gamma))
+    decl = (0.006918 - 0.399912 * math.cos(gamma) + 0.070257 * math.sin(gamma) - 0.006758 * math.cos(2*gamma) + 0.000907 * math.sin(2*gamma) - 0.002697 * math.cos(3*gamma) + 0.00148 * math.sin(3*gamma))
+    utc_offset = local_time.utcoffset()
+    offset_minutes = utc_offset.total_seconds() / 60 if utc_offset else 0
+    minutes = hour * 60 + eqtime + 4 * longitude - offset_minutes
+    ha = math.radians(minutes / 4 - 180)
+    lat = math.radians(latitude)
+    return math.degrees(math.asin(math.sin(lat)*math.sin(decl)+math.cos(lat)*math.cos(decl)*math.cos(ha)))
+
+
+def _astro_score(lighting, day, conditions):
+    elevation = lighting["solar_elevation_degrees"]
+    darkness = max(0, min(100, round((-elevation - 6) / 12 * 100)))
+    clouds = conditions.get("cloud_cover", day.get("cloud_cover_mean"))
+    clouds = 50 if clouds is None else clouds
+    moon = day.get("moon_phase")
+    illumination = (1 - abs(2 * moon - 1)) * 100 if moon is not None else 50
+    return {"score": round(.55 * darkness + .35 * (100-clouds) + .10 * (100-illumination)),
+            "darkness_score": darkness, "cloud_cover_percent": clouds, "moon_phase_fraction": moon,
+            "moon_illumination_estimate_percent": round(illumination),
+            "formula": "55% darkness below -6° solar elevation + 35% clear sky + 10% low moon illumination",
+            "darkness_note": "Full astro darkness begins near -18° solar elevation; -6° is the blue-hour boundary."}
+
+
+def _build_opportunities(days, timezone, bird_data, hourly=None, lighting=None):
+    """Build daily photography windows and nighttime astro windows."""
     opportunities = []
     species_factor = _species_score(bird_data)
+    latitude = lighting["latitude"] if lighting else 0
+    longitude = lighting["longitude"] if lighting else 0
     for day_index, day in enumerate(days):
-        within_bird_window = (
-            bird_data is not None
-            and day_index < bird_data["window_days"]
-        )
-        for window in ("sunrise", "midday", "sunset"):
-            if window == "midday":
-                time = _solar_noon(day)
-            else:
-                time = day[window]
-            if not time:
-                continue
-            window_weather = _nearest_hour(hourly or {}, time)
-            light_detail = _light_score_breakdown(day, window, window_weather)
+        within_bird_window = bird_data is not None and day_index < bird_data["window_days"]
+        windows = [(name, day[name]) for name in ("sunrise", "sunset") if day.get(name)]
+        noon = _solar_noon(day)
+        if noon:
+            windows.append(("midday", noon))
+        if day.get("sunset"):
+            sunset = datetime.fromisoformat(day["sunset"])
+            for offset in (1, 2, 3):
+                windows.append(("night", (sunset + timedelta(hours=offset)).isoformat()))
+        for window, time in windows:
+            conditions = _nearest_hour(hourly or {}, time)
+            elevation = _solar_elevation(datetime.fromisoformat(time), latitude, longitude)
+            astro_active = window == "night" and elevation < -6
+            light_detail = _light_score_breakdown(day, window if window != "night" else "sunset", conditions)
             light = light_detail["score"]
-            sky = _sky_score(day, light, window_weather)
-            weather_detail = _weather_suitability_breakdown(day, window_weather)
+            sky = _sky_score(day, light, conditions)
+            if elevation < -6:
+                sky = 0
+            weather_detail = _weather_suitability_breakdown(day, conditions)
             weather = weather_detail["score"]
-            photogenic_breakdown = _photogenic_score_breakdown(
-                day, light, window_weather
-            )
-            birding_breakdown = _birding_score_breakdown(
-                bird_data, light, weather
-            ) if within_bird_window and bird_data and bird_data["species"] else None
-            birding = round(0.55 * species_factor + 0.30 * light + 0.15 * weather) \
-                if within_bird_window and bird_data["species"] else None
+            photo_detail = _photogenic_score_breakdown(day, light, conditions)
+            birds_present = within_bird_window and bird_data and bird_data["species"]
+            birding_detail = _birding_score_breakdown(bird_data, light, weather) if birds_present else None
+            birding = round(.55*species_factor + .30*light + .15*weather) if birds_present else None
+            astro = _astro_score({"solar_elevation_degrees": elevation}, day, conditions) if astro_active else None
+            if elevation < -6:
+                birding = None
+                birding_detail = None
             opportunities.append({
                 "date": day["date"], "window": window, "time": time,
+                "solar_elevation_degrees": round(elevation, 2),
                 "photogenic_sky_score": sky, "light_quality_score": light,
-                "birding_score": birding,
-                "seasonal_bird_score": species_factor if within_bird_window and bird_data["species"] else None,
+                "birding_score": birding, "astro_score": astro["score"] if astro else None,
+                "astro_score_breakdown": astro,
+                "seasonal_bird_score": species_factor if birds_present else None,
                 "weather_suitability_score": weather,
                 "light_quality_breakdown": light_detail,
                 "weather_suitability_breakdown": weather_detail,
-                "photogenic_score_breakdown": photogenic_breakdown,
-                "birding_score_breakdown": birding_breakdown,
+                "photogenic_score_breakdown": photo_detail | ({"calculated_score": 0, "night_gate": "sun below -6 degrees; astro-only"} if elevation < -6 else {}),
+                "birding_score_breakdown": birding_detail,
                 "condition": day["condition"],
-                "precipitation_probability_max": day["precipitation_probability_max"],
-                "wind_speed_kmh": day["wind_speed_kmh"],
-                "conditions_at_window": window_weather,
+                "conditions_at_window": conditions,
                 "cloud_cover_mean": day["cloud_cover_mean"],
                 "seasonal_bird_species_count": bird_data.get("species_count", len(bird_data["species"])) if bird_data else None,
             })
-    opportunities.sort(key=lambda item: (-(item["birding_score"] or 0), item["time"]))
+    opportunities.sort(key=lambda item: item["time"])
     return opportunities
 
 
@@ -645,21 +729,69 @@ class PhotogenicSkySensor(PlanningSensor):
 
     @property
     def native_value(self):
-        best = _best(self.coordinator.data["opportunities"], "photogenic_sky_score")
+        data = self.coordinator.data
+        if data.get("lighting", {}).get("phase") == "night":
+            return 0
+        best = _best(data["opportunities"], "photogenic_sky_score")
         return best["photogenic_sky_score"] if best else None
 
     @property
     def extra_state_attributes(self):
         data = self.coordinator.data
         best = _best(data["opportunities"], "photogenic_sky_score")
+        current_night = data.get("lighting", {}).get("phase") == "night"
         return _common_attributes(data) | {
+            "current_lighting": data.get("lighting"),
             "weather_forecast": data["weather"]["days"] if data["weather"] else [],
             "best_opportunity": best,
-            "score_breakdown": best["photogenic_score_breakdown"] if best else None,
-            "decision": _decision_text("Photogenic sky", best),
+            "score_breakdown": ((best["photogenic_score_breakdown"] | {"current_state_score": 0, "status": "astro_only_after_blue_hour"}) if current_night and best else best["photogenic_score_breakdown"] if best else None),
+            "decision": "0/100; sun below blue hour. Astro score is active." if current_night else _decision_text("Photogenic sky", best),
             "opportunities": data["opportunities"],
             "score_note": "Forecast guide from light quality, cloud cover, and rain probability; not a guarantee. Rounded scores can match across locations; compare coordinates and component inputs.",
         }
+
+
+class LightingSensor(PlanningSensor):
+    """Current local light phase and cloud layers."""
+    _attr_translation_key = "lighting"
+    _attr_icon = "mdi:weather-sunny"
+    def __init__(self, coordinator, location_name, entry_id):
+        super().__init__(coordinator, location_name, entry_id)
+        self._attr_unique_id = f"{entry_id}_lighting"
+    @property
+    def native_value(self):
+        return self.coordinator.data["lighting"]["phase"] if self.coordinator.data.get("lighting") else None
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data
+        return (data.get("lighting") or {}) | {
+            "daylight_duration_forecast_seconds": [day.get("daylight_duration_seconds") for day in data["weather"]["days"]],
+            "moon_forecast": [{"date": day["date"], "phase_fraction": day.get("moon_phase"), "moonrise": day.get("moonrise"), "moonset": day.get("moonset")} for day in data["weather"]["days"]],
+            "cloud_forecast_by_hour": [{"time": t, "cloud_cover": _at(data["weather"]["hourly"], "cloud_cover", i),
+                "low_cloud_cover": _at(data["weather"]["hourly"], "cloud_cover_low", i),
+                "mid_cloud_cover": _at(data["weather"]["hourly"], "cloud_cover_mid", i),
+                "high_cloud_cover": _at(data["weather"]["hourly"], "cloud_cover_high", i)}
+                for i, t in enumerate(data["weather"]["hourly"].get("time", []))],
+        }
+
+
+class AstroSensor(PlanningSensor):
+    """Best astrophotography opportunity after blue hour."""
+    _attr_translation_key = "astro_score"
+    _attr_icon = "mdi:star-shooting"
+    def __init__(self, coordinator, location_name, entry_id):
+        super().__init__(coordinator, location_name, entry_id)
+        self._attr_unique_id = f"{entry_id}_astro_score"
+    @property
+    def native_value(self):
+        best = _best(self.coordinator.data["opportunities"], "astro_score")
+        return best["astro_score"] if best else None
+    @property
+    def extra_state_attributes(self):
+        best = _best(self.coordinator.data["opportunities"], "astro_score")
+        return {"best_astro_opportunity": best, "score_breakdown": best.get("astro_score_breakdown") if best else None,
+                "lighting": self.coordinator.data.get("lighting"),
+                "note": "Astro score is only calculated when forecast solar elevation is below -6° (end of civil twilight)."}
 
 
 class BirdingSensor(PlanningSensor):
@@ -726,10 +858,14 @@ class ScoreDecisionSensor(PlanningSensor):
         data = self.coordinator.data
         score_key = "photogenic_sky_score" if self.product == "photogenic" else "birding_score"
         best = _best(data["opportunities"], score_key)
+        if self.product == "photogenic" and data.get("lighting", {}).get("phase") == "night":
+            return "No sunlit photo score now; use the Astrophotography score after blue hour."
         if self.product == "birding" and data["birds"] is None:
             return "Birding score unavailable: regional bird data could not be retrieved."
         if self.product == "birding" and not data["birds"]["species"]:
             return "No historical seasonal bird records were found in this region."
+        if self.product == "photogenic" and data.get("lighting", {}).get("phase") == "night":
+            return "0/100; sun below blue hour. Daylight photo score is inactive; see Astrophotography score."
         return _decision_text("Photogenic sky" if self.product == "photogenic" else "Birding", best)
 
     @property
@@ -800,13 +936,24 @@ class TideSensor(PlanningSensor):
             return None
         if tide_data.get("status") != "available":
             return tide_data["status"]
-        return len(tide_data.get("events", []))
+        events = tide_data.get("events", [])
+        now = datetime.now(dt_timezone.utc)
+        upcoming = [event for event in events if datetime.fromisoformat(event["time"].replace("Z", "+00:00")) >= now]
+        if not upcoming:
+            return "No upcoming tide event"
+        event = upcoming[0]
+        from zoneinfo import ZoneInfo
+        local_time = datetime.fromisoformat(event["time"].replace("Z", "+00:00")).astimezone(ZoneInfo(tide_data.get("timezone", "UTC")))
+        return f"{event['type'].title()} tide at {local_time.strftime('%Y-%m-%d %H:%M')}"
 
     @property
     def extra_state_attributes(self):
         data = self.coordinator.data
         return {
             "tides": data["tides"],
+            "upcoming_events": data["tides"].get("events", []) if data["tides"] else [],
+            "calendar_timezone": data["tides"].get("timezone") if data["tides"] else None,
+            "calendar_days": _group_tides_by_day(data["tides"]) if data["tides"] else [],
             "shoreline_enabled": data["tides"] is not None,
             "tide_match_windows": [
                 {
@@ -821,6 +968,19 @@ class TideSensor(PlanningSensor):
                 for day in (data["weather"]["days"] if data["weather"] else [])
             ] if data["tides"] and data["tides"].get("events") else [],
         }
+
+
+def _group_tides_by_day(tide_data):
+    """Group upcoming high and low events by the provider's local calendar date."""
+    from zoneinfo import ZoneInfo
+    zone = ZoneInfo(tide_data.get("timezone", "UTC"))
+    grouped = {}
+    for event in tide_data.get("events", []):
+        local = datetime.fromisoformat(event["time"].replace("Z", "+00:00")).astimezone(zone)
+        grouped.setdefault(local.date().isoformat(), []).append({
+            "time": local.isoformat(), "type": event.get("type"), "height_m": event.get("height_m")
+        })
+    return [{"date": day, "events": events} for day, events in sorted(grouped.items())]
 
 
 def _common_attributes(data):
