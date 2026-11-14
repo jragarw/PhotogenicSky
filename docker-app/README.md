@@ -2,19 +2,25 @@
 
 A self-hosted browser app for planning photography and birding conditions. It presents the weather, light, clouds, bird evidence, astro windows, tide calendar, and the inputs behind each score in one report. It runs without Home Assistant, paid APIs, API keys, or external font/CDN dependencies.
 
-## Run it
+## Deploy with Dockge
 
-From the `docker-app` directory:
+The published image is `ghcr.io/jragarw/photogenic-sky:latest`. In Dockge, create a stack and paste [`compose.yaml`](compose.yaml). It pulls the image from GHCR and mounts persistent location settings at `/data`.
 
-```sh
-docker compose up --build -d
+The Compose file uses the TrueNAS path you provided:
+
+```text
+/mnt/FastStorage/docker/data/codeserver/photogenic-sky
 ```
 
-Open `http://<docker-host>:8080`, add a location, and choose a matching place or enter latitude and longitude directly. Location settings are stored in the persistent `photogenic_sky_data` Docker volume and remain when the container is replaced. Back up that volume before removing it; `docker compose down -v` deletes it.
+Create that directory or dataset first and grant write access to UID/GID `568` (TrueNAS `apps`). If your dataset uses another owner, set `PUID` and `PGID` in Dockge’s stack environment to that numeric UID/GID. Choose an unused host port with `WEB_PORT` if port 8080 is occupied. Set `APP_PASSWORD` to enable browser/API Basic Auth; `APP_USERNAME` defaults to `photogenic`.
 
-The app refreshes provider data when first opened and caches each location report for four hours. Use the refresh button to request fresh data immediately. Set `CACHE_SECONDS` in `compose.yaml` to change the cache period.
+Open `http://<truenas-host>:8080` and add locations in the browser. When a new image is published, use Dockge’s **Pull** / **Redeploy** action to fetch and start it. The Compose file uses `pull_policy: always`, so a compose up also checks GHCR for the latest image. Do not remove the data directory when updating the image.
 
-To protect the browser and API with HTTP Basic Auth, set `APP_PASSWORD` (and optionally `APP_USERNAME`) in the service environment before starting the app. Do not expose an unauthenticated instance to the public internet; use a reverse proxy with authentication/TLS if remote access is needed.
+The image is built from `docker-app/` and published to GHCR whenever app files are merged to `main`. It is tagged `latest` and with the app version from `VERSION`; bump that file for a versioned update. There is no API key or paid data provider.
+
+For local source development, use `docker compose -f compose.dev.yaml up --build` instead; that file builds from the checkout and stores data in a named volume.
+
+The app refreshes provider data when a report is opened and caches each location for four hours. Use the refresh button to fetch new data immediately. Set `CACHE_SECONDS` in `compose.yaml` to change the cache period.
 
 ## What the report shows
 

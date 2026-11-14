@@ -1,0 +1,15 @@
+services:
+  photogenic-sky:
+    build: .
+    image: photogenic-sky:dev
+    container_name: photogenic-sky-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      CACHE_SECONDS: "14400"
+    volumes:
+      - photogenic_sky_dev_data:/data
+
+volumes:
+  photogenic_sky_dev_data:

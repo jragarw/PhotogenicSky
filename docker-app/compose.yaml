@@ -1,17 +1,15 @@
 services:
   photogenic-sky:
-    build: .
+    image: ghcr.io/jragarw/photogenic-sky:latest
+    pull_policy: always
     container_name: photogenic-sky
     restart: unless-stopped
+    user: "${PUID:-568}:${PGID:-568}"
     ports:
-      - "8080:8080"
+      - "${WEB_PORT:-8080}:8080"
     environment:
       CACHE_SECONDS: "14400"
-      # Set APP_PASSWORD to protect the UI and API with browser Basic Auth.
-      # APP_USERNAME: photogenic
-      # APP_PASSWORD: change-this-password
+      APP_USERNAME: "${APP_USERNAME:-photogenic}"
+      APP_PASSWORD: "${APP_PASSWORD:-}"
     volumes:
-      - photogenic_sky_data:/data
-
-volumes:
-  photogenic_sky_data:
+      - /mnt/FastStorage/docker/data/codeserver/photogenic-sky:/data
