@@ -1,6 +1,7 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 
 # VS Code
 .vscode/
@@ -8,3 +9,6 @@ __pycache__/
 # Home Assistant
 .HA_VERSION
 deps/
+
+# Standalone Docker app data
+docker-app/data/
