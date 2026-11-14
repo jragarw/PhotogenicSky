@@ -1,0 +1,17 @@
+services:
+  photogenic-sky:
+    build: .
+    container_name: photogenic-sky
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      CACHE_SECONDS: "14400"
+      # Set APP_PASSWORD to protect the UI and API with browser Basic Auth.
+      # APP_USERNAME: photogenic
+      # APP_PASSWORD: change-this-password
+    volumes:
+      - photogenic_sky_data:/data
+
+volumes:
+  photogenic_sky_data:

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101316">
+  <title>Photogenic Sky Planner</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Photogenic Sky home"><span class="brand-mark">✳</span><span><b>PHOTOGENIC</b><small>SKY PLANNER</small></span></a>
+      <div class="top-actions"><span id="refreshStamp" class="muted">Waiting for a location</span><button id="refreshButton" class="icon-button" title="Refresh report" aria-label="Refresh report">↻</button></div>
+    </header>
+    <main>
+      <section class="intro-row">
+        <div><p class="eyebrow">FIELD CONDITIONS · PHOTO PLANNING</p><h1 id="pageTitle">Find the light.<br><em>Know the moment.</em></h1><p class="intro-copy">Weather, light, birds and tides, with the inputs behind every score in view.</p></div>
+        <div class="location-tools"><label for="locationSelect">PLANNING LOCATION</label><div class="select-row"><select id="locationSelect" aria-label="Planning location"><option value="">Add a location to begin</option></select><button id="newLocationButton" class="button button-quiet">＋ Location</button></div></div>
+      </section>
+
+      <section id="emptyState" class="empty-state hidden"><div class="empty-icon">◎</div><h2>Start with a place you photograph</h2><p>Add a location by searching for a town or postcode. You can also enter exact coordinates.</p><button id="emptyAddButton" class="button button-primary">Add your first location <span>→</span></button></section>
+
+      <section id="locationFormWrap" class="form-panel hidden" aria-labelledby="formTitle">
+        <div class="form-heading"><div><p class="eyebrow">LOCATION SETTINGS</p><h2 id="formTitle">Add a location</h2></div><button type="button" id="closeFormButton" class="icon-button" aria-label="Close location form">×</button></div>
+        <form id="locationForm">
+          <div class="form-grid">
+            <label>Display name<input name="name" required maxlength="80" placeholder="e.g. Baxenden" autocomplete="off"></label>
+            <label>Find a town or postcode<div class="input-button"><input id="placeQuery" placeholder="Search places" autocomplete="off"><button type="button" id="searchPlaceButton" class="button button-quiet">Search</button></div></label>
+            <label>Matching place<select id="placeResults"><option value="">Choose a search result</option></select></label>
+            <label>Bird outlook<select name="lookahead_days"><option value="7">7 days</option><option value="14">14 days</option></select></label>
+            <label>Regional bird search<select name="radius_km"><option value="10">10 km radius</option><option value="25" selected>25 km radius</option><option value="50">50 km radius</option></select></label>
+            <label class="check-label"><input type="checkbox" name="shoreline"><span>Near shoreline — show 30 days of tide events</span></label>
+          </div>
+          <details class="coordinates"><summary>Enter coordinates directly</summary><div class="coordinate-grid"><label>Latitude<input name="latitude" inputmode="decimal" placeholder="53.273"></label><label>Longitude<input name="longitude" inputmode="decimal" placeholder="-3.220"></label></div></details>
+          <input type="hidden" name="place_name">
+          <div class="form-footer"><div class="form-actions"><button id="deleteLocationButton" type="button" class="button delete-button hidden">Remove location</button><p id="formError" class="form-error" role="alert"></p></div><button id="saveLocationButton" class="button button-primary" type="submit">Save location <span>→</span></button></div>
+        </form>
+      </section>
+
+      <div id="loadingState" class="loading hidden"><span class="spinner"></span><span>Gathering the forecast and planning window…</span></div>
+      <div id="errorBanner" class="error-banner hidden" role="status"></div>
+
+      <section id="report" class="hidden">
+        <div class="report-heading"><div><div class="place-line"><span id="placeName"></span><span id="phasePill" class="phase-pill"></span></div><h2 id="reportTitle">—</h2><p id="reportSub" class="muted">Seven-day weather · seasonal bird evidence · photographic light</p></div><button id="editLocationButton" class="button button-quiet">Edit location</button></div>
+
+        <div id="providerStatus" class="provider-strip"></div>
+
+        <section class="score-grid" aria-label="Current and upcoming scores">
+          <article class="score-card photo-card"><div class="score-card-top"><span class="score-icon">◉</span><span id="photoKicker" class="card-kicker">BEST UPCOMING DAYLIGHT WINDOW</span></div><div class="score-line"><strong id="photoScore">—</strong><span>/100</span></div><div id="photoWhen" class="score-when">No daylight window available</div><p id="photoWhy" class="score-why">Score details appear when weather data is available.</p><div id="photoContributions" class="contribution-list"></div></article>
+          <article class="score-card bird-card"><div class="score-card-top"><span class="score-icon">⌁</span><span class="card-kicker">BIRDING CONDITIONS</span></div><div class="score-line"><strong id="birdScore">—</strong><span>/100</span></div><div id="birdWhen" class="score-when">Seasonal evidence not loaded</div><p id="birdWhy" class="score-why">Light contributes to this score along with regional bird evidence and weather.</p><div id="birdContributions" class="contribution-list"></div></article>
+          <article class="score-card astro-card"><div class="score-card-top"><span class="score-icon">✧</span><span class="card-kicker">AFTER BLUE HOUR</span></div><div class="score-line"><strong id="astroScore">—</strong><span>/100</span></div><div id="astroWhen" class="score-when">No dark-sky window in forecast</div><p id="astroWhy" class="score-why">Astro score uses solar darkness, cloud cover and moon illumination.</p><div id="astroContributions" class="contribution-list"></div></article>
+        </section>
+
+        <section class="section-block">
+          <div class="section-heading"><div><p class="eyebrow">RIGHT NOW</p><h2>Light &amp; sky</h2></div><span id="currentTime" class="section-note"></span></div>
+          <div class="conditions-grid">
+            <article class="condition-card elevation-card"><div class="card-kicker">SUN ELEVATION</div><div class="large-reading"><strong id="sunElevation">—</strong><span>°</span></div><div id="sunPhaseText" class="reading-caption">—</div><div class="sun-track"><span id="sunNeedle"></span></div><div class="track-labels"><span>−18° astro</span><span>−6° blue-hour end</span><span>6°</span></div></article>
+            <article class="condition-card cloud-card"><div class="card-kicker">CLOUD COMPOSITION</div><div id="cloudRows" class="cloud-rows"></div><p class="fine-print">Cloud layers at this location · Open-Meteo</p></article>
+            <article class="condition-card sun-card"><div class="card-kicker">TODAY’S DAYLIGHT</div><div class="sun-times"><div><span>Sunrise</span><b id="sunriseTime">—</b><small id="sunriseTide"></small></div><div><span>Solar noon</span><b id="noonTime">—</b></div><div><span>Sunset</span><b id="sunsetTime">—</b><small id="sunsetTide"></small></div></div><div class="daily-facts"><span>UV max <b id="uvMax">—</b></span><span>Moon <b id="moonPhaseNow">—</b></span><span>Moonrise <b id="moonriseTime">—</b></span><span>Moonset <b id="moonsetTime">—</b></span></div></article>
+          </div>
+        </section>
+
+        <section class="section-block forecast-section">
+          <div class="section-heading"><div><p class="eyebrow">PLAN THE NEXT WEEK</p><h2>Photo windows</h2></div><span class="section-note">Daylight score is 0 after blue hour · Astro applies after dark</span></div>
+          <div id="forecastTable" class="forecast-list"></div>
+        </section>
+
+        <div class="lower-grid">
+          <section class="section-block bird-section"><div class="section-heading"><div><p class="eyebrow">REGIONAL SEASONAL EVIDENCE</p><h2>Bird outlook</h2></div><span id="birdWindowNote" class="section-note">—</span></div><div id="birdEvidenceSummary" class="evidence-summary"></div><div id="birdSpecies" class="species-list"></div><p id="birdNote" class="fine-print"></p></section>
+          <section class="section-block tide-section"><div class="section-heading"><div><p class="eyebrow">SHORELINE CONDITIONS</p><h2>30-day tide calendar</h2></div><span id="tideStation" class="section-note"></span></div><div id="tideMessage" class="tide-message"></div><div id="tideCalendar" class="tide-calendar"></div><p id="tideAttribution" class="fine-print"></p></section>
+        </div>
+        <footer class="report-footer"><span id="dataUpdated">—</span><span>Scores are planning guides, not guarantees. Tide predictions are not for navigation.</span></footer>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

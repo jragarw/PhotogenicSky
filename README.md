@@ -1,5 +1,12 @@
 # Photogenic Sky
 
+## Standalone Docker app
+
+The browser-first Photogenic Sky Planner runs without Home Assistant and displays full reports with score inputs, cloud composition, forecast opportunities, bird evidence, astro windows, and a 30-day tide calendar. It also exposes a compact JSON endpoint for Glance.
+
+See the [Docker app guide](docker-app/README.md) for setup, configuration, API, and provider details. The existing Home Assistant integration remains available as a separate option.
+
+
 Photogenic Sky brings weather, birding, and shared light-quality guidance together for each saved Home Assistant location.
 
 ## Features
