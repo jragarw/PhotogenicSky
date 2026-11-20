@@ -779,6 +779,8 @@ class ReportService:
         astro_candidates = [x for x in opportunities if x["astro"]]
         best_astro = max(astro_candidates, key=lambda x: x["astro"]["score"], default=None)
         calendar = tide_calendar(tides, tides.get("timezone", timezone_name))
+        tide_heights = [float(event["height_m"]) for event in tides.get("events", [])
+                        if event.get("height_m") is not None]
         tides_by_date = {item["date"]: item["events"] for item in calendar}
         opportunities_by_date: dict[str, list[dict]] = {}
         for item in opportunities:
@@ -806,6 +808,9 @@ class ReportService:
             "lighting": lighting, "weather_days": weather["days"],
             "current_clouds": weather.get("current", {}),
             "bird_outlook": birds, "tides": tides, "tide_calendar": calendar,
+            "tide_range": {"minimum_m": min(tide_heights) if tide_heights else None,
+                           "maximum_m": max(tide_heights) if tide_heights else None,
+                           "window_days": 30},
             "tide_context_today": {"sunrise": sunrise_tide, "sunset": sunset_tide},
             "opportunities": opportunities,
             "daily_summary": daily_summary,
@@ -820,6 +825,46 @@ class ReportService:
 
 STORE = LocationStore(LOCATIONS_FILE)
 SERVICE = ReportService(STORE)
+
+
+def location_tide_alerts(report: dict) -> list[dict]:
+    """Find high tide/sun alignments in the seven-day weather forecast."""
+    if not report.get("location", {}).get("shoreline") or report.get("tides", {}).get("status") != "available":
+        return []
+    timezone_name = report.get("timezone", "UTC")
+    zone = ZoneInfo(timezone_name)
+    daily = report.get("daily_summary", [])[:7]
+    high_levels = [float(event["height_m"]) for event in report.get("tides", {}).get("events", [])
+                   if event.get("type") == "high" and event.get("height_m") is not None]
+    maximum = max(high_levels, default=None)
+    alerts = []
+    for day in daily:
+        targets = [("sunrise", day.get("sunrise")), ("sunset", day.get("sunset"))]
+        for event in day.get("tides", []):
+            if event.get("type") != "high":
+                continue
+            tide_time = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
+            if tide_time.tzinfo is None:
+                tide_time = tide_time.replace(tzinfo=zone)
+            for label, raw_target in targets:
+                if not raw_target:
+                    continue
+                target = datetime.fromisoformat(raw_target)
+                if target.tzinfo is None:
+                    target = target.replace(tzinfo=zone)
+                minutes = abs((tide_time.astimezone(timezone.utc) - target.astimezone(timezone.utc)).total_seconds()) / 60
+                is_very_high = maximum is not None and event.get("height_m") is not None and float(event["height_m"]) >= maximum * .9
+                if minutes <= 60 and not (label == "sunset" and is_very_high):
+                    alerts.append({"type": "high_tide_near_sun", "date": day["date"], "time": tide_time.astimezone(zone).isoformat(),
+                                   "sun_event": label, "minutes_from_sun_event": round(minutes),
+                                   "height_m": event.get("height_m"),
+                                   "message": f"High tide near {label} ({round(minutes)} min apart)"})
+                if label == "sunset" and minutes <= 60 and is_very_high:
+                    alerts.append({"type": "very_high_tide_near_sunset", "date": day["date"], "time": tide_time.astimezone(zone).isoformat(),
+                                   "sun_event": label, "minutes_from_sun_event": round(minutes),
+                                   "height_m": event.get("height_m"), "reference_max_m": maximum,
+                                   "message": f"Very high tide near sunset ({float(event['height_m']):.1f} m; 30-day max {maximum:.1f} m)"})
+    return alerts
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -879,6 +924,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"status": "ok", "version": APP_VERSION})
         if path == "/api/locations":
             return self._json(200, STORE.all())
+        if path == "/api/overview":
+            locations = STORE.all()
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(locations)))) as pool:
+                reports = list(pool.map(lambda loc: SERVICE.report(loc["id"]), locations))
+            rows, alerts = [], []
+            for location, report in zip(locations, reports):
+                if not report or report.get("error"):
+                    rows.append({"location": location, "status": "unavailable", "alerts": []})
+                    continue
+                row_alerts = location_tide_alerts(report)
+                rows.append({"location": location, "status": "available", "alerts": row_alerts,
+                             "scores": report.get("scores", {}), "lighting": report.get("lighting", {}),
+                             "updated_at": report.get("updated_at"),
+                             "tide_range": report.get("tide_range")})
+                for alert in row_alerts:
+                    alerts.append({**alert, "timezone": report.get("timezone", "UTC"),
+                                   "location_id": location["id"], "location_name": location["name"]})
+            return self._json(200, {"locations": rows, "alerts": alerts})
         if path.startswith("/api/report/"):
             location_id = path.rsplit("/", 1)[-1]
             query = parse_qs(parsed.query)

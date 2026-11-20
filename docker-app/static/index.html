@@ -16,7 +16,7 @@
     <main>
       <section class="intro-row">
         <div><p class="eyebrow">FIELD CONDITIONS · PHOTO PLANNING</p><h1 id="pageTitle">Find the light.<br><em>Know the moment.</em></h1><p class="intro-copy">Weather, light, birds and tides, with the inputs behind every score in view.</p></div>
-        <div class="location-tools"><label for="locationSelect">PLANNING LOCATION</label><div class="select-row"><select id="locationSelect" aria-label="Planning location"><option value="">Add a location to begin</option></select><button id="newLocationButton" class="button button-quiet">＋ Location</button></div></div>
+      <div class="location-tools"><label for="locationSelect">PLANNING LOCATION</label><div class="select-row"><select id="locationSelect" aria-label="Planning location"><option value="">Choose a location</option></select><button id="homeButton" class="button button-quiet hidden">Locations</button><button id="newLocationButton" class="button button-quiet">＋ Location</button></div></div>
       </section>
 
       <section id="emptyState" class="empty-state hidden"><div class="empty-icon">◎</div><h2>Start with a place you photograph</h2><p>Add a location by searching for a town or postcode. You can also enter exact coordinates.</p><button id="emptyAddButton" class="button button-primary">Add your first location <span>→</span></button></section>
@@ -49,6 +49,12 @@
       <div id="loadingState" class="loading hidden"><span class="spinner"></span><span>Gathering the forecast and planning window…</span></div>
       <div id="errorBanner" class="error-banner hidden" role="status"></div>
 
+      <section id="overview" class="overview hidden">
+        <div class="section-heading"><div><p class="eyebrow">YOUR PLANNING LOCATIONS</p><h2>Coming up</h2></div><span class="section-note">Alerts from the next seven days</span></div>
+        <div id="alertBoard" class="alert-board"></div>
+        <div id="locationCards" class="location-cards"></div>
+      </section>
+
       <section id="report" class="hidden">
         <div class="report-heading"><div><div class="place-line"><span id="placeName"></span><span id="phasePill" class="phase-pill"></span></div><h2 id="reportTitle">—</h2><p id="reportSub" class="muted">Seven-day weather · seasonal bird evidence · photographic light</p></div><button id="editLocationButton" class="button button-quiet">Edit location</button></div>
 
@@ -76,7 +82,7 @@
 
         <div class="lower-grid">
           <section class="section-block bird-section"><div class="section-heading"><div><p class="eyebrow">REGIONAL SEASONAL EVIDENCE</p><h2>Bird outlook</h2></div><span id="birdWindowNote" class="section-note">—</span></div><div id="birdEvidenceSummary" class="evidence-summary"></div><div id="birdSpecies" class="species-list"></div><p id="birdNote" class="fine-print"></p></section>
-          <section class="section-block tide-section"><div class="section-heading"><div><p class="eyebrow">SHORELINE CONDITIONS</p><h2>30-day tide calendar</h2></div><span id="tideStation" class="section-note"></span></div><div id="tideMessage" class="tide-message"></div><div id="tideCalendar" class="tide-calendar"></div><p id="tideAttribution" class="fine-print"></p></section>
+          <section class="section-block tide-section"><div class="section-heading"><div><p class="eyebrow">SHORELINE CONDITIONS</p><h2>30-day tide calendar</h2></div><span id="tideStation" class="section-note"></span></div><div id="tideMessage" class="tide-message"></div><div id="tideRange" class="tide-range hidden"></div><div id="tideCalendar" class="tide-calendar"></div><p id="tideAttribution" class="fine-print"></p></section>
         </div>
         <footer class="report-footer"><span id="dataUpdated">—</span><span>Scores are planning guides, not guarantees. Tide predictions are not for navigation.</span></footer>
       </section>

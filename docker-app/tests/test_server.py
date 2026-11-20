@@ -16,6 +16,20 @@ import server
 
 
 class SolarAndScoreTests(TestCase):
+    def test_tide_alerts_find_sunrise_and_very_high_sunset_alignments(self):
+        report = {
+            "location": {"shoreline": True}, "timezone": "UTC",
+            "tides": {"status": "available", "events": [
+                {"type": "high", "height_m": 9.0}, {"type": "high", "height_m": 6.0}]},
+            "daily_summary": [{"date": "2026-11-21", "sunrise": "2026-11-21T06:30",
+                "sunset": "2026-11-21T17:00", "tides": [
+                    {"type": "high", "height_m": 9.0, "time": "2026-11-21T16:30:00Z"},
+                    {"type": "high", "height_m": 6.0, "time": "2026-11-21T06:00:00Z"}]}],
+        }
+        alerts = server.location_tide_alerts(report)
+        self.assertEqual(len(alerts), 2)
+        self.assertEqual(sum(item["type"] == "very_high_tide_near_sunset" for item in alerts), 1)
+
     def test_preference_weights_normalize_and_change_photo_score(self):
         prefs = server.normalize_preferences({"photo_light": 100, "photo_sky": 0, "photo_weather": 0})
         self.assertEqual(prefs["photo_light"], 100)

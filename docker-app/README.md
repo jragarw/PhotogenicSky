@@ -30,6 +30,7 @@ The app refreshes provider data when a report is opened and caches each location
 - **Light and weather:** current solar phase/elevation, total and low/mid/high cloud cover, sunrise, solar noon, sunset, UV, seven-day weather, and the detailed conditions at each planning window.
 - **Tide calendar:** 30 days of local high/low events when shoreline is enabled, plus tide context near today’s sunrise and sunset.
 - **Daily lineup:** each forecast day groups its best photo, birding, and astro windows with key sun/moon times, matching local tide events, and regional seasonal bird evidence.
+- **Location overview:** the landing page lists saved locations and highlights high tides within an hour of sunrise or sunset, plus very high tides close to sunset. The detailed tide pane shows the lowest and highest predictions across the 30-day tide forecast as context for individual events.
 - **Location scoring preferences:** set the relative weights for light, sky, and weather by activity using sliders. Photography defaults to dramatic broken cloud and can be switched to clear skies; birding can emphasize historical seasonal evidence; astro can emphasize darkness, clear sky, or moonlight. Each activity's weights are normalized to 100%.
 
 Scores are comparative planning guides, not guarantees. Tide predictions are harmonic estimates and are not for navigation; check the station and datum before relying on tide heights.
@@ -76,6 +77,7 @@ Providers refresh independently. If one fails, its status and error are shown in
 - `PUT /api/locations/{id}` · update a location
 - `DELETE /api/locations/{id}`
 - `GET /api/report/{id}` · complete report and score explanations (`?refresh=1` bypasses cache)
+- `GET /api/overview` · saved locations and seven-day tide/sun alignment alerts
 - `GET /api/glance/{id}` · compact dashboard payload
 - `PUT /api/locations/{id}` accepts a `preferences` object for photo, birding, and astro weights plus `sky_style` (`clear` or `dramatic`). Existing locations receive default preferences.
 - `GET /api/geocode?q=<place>` · place search

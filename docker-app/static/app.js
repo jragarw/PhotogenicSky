@@ -37,20 +37,46 @@ const preferenceFields = ["photo_light","photo_sky","photo_weather","bird_eviden
 async function loadLocations(preferredId) {
   state.locations = await api("/api/locations");
   const select = $("locationSelect");
-  select.innerHTML = state.locations.length
-    ? state.locations.map(x => `<option value="${safe(x.id)}">${safe(x.name)}${x.place_name ? ` · ${safe(x.place_name)}` : ""}</option>`).join("")
-    : `<option value="">Add a location to begin</option>`;
+  select.innerHTML = `<option value="">All locations</option>` + state.locations.map(x => `<option value="${safe(x.id)}">${safe(x.name)}${x.place_name ? ` · ${safe(x.place_name)}` : ""}</option>`).join("");
   state.activeId = preferredId || state.activeId || state.locations[0]?.id || "";
   if (!state.locations.some(x => x.id === state.activeId)) state.activeId = state.locations[0]?.id || "";
   select.value = state.activeId;
   setVisible("emptyState", !state.locations.length);
   setVisible("report", false);
-  if (state.activeId) await loadReport();
+  if (preferredId && state.activeId) await loadReport();
+  else { state.activeId = ""; select.value = ""; await loadOverview(); }
+}
+async function loadOverview() {
+  state.activeId = "";
+  $("locationSelect").value = "";
+  setVisible("report", false); setVisible("overview", true); setVisible("homeButton", false);
+  $("pageTitle").innerHTML = `Plan the moment.<br><em>Across every place.</em>`;
+  if (!state.locations.length) {
+    $("alertBoard").innerHTML = `<div class="overview-empty">Add a planning location to see useful alerts here.</div>`;
+    $("locationCards").innerHTML = ""; return;
+  }
+  $("alertBoard").innerHTML = `<div class="overview-empty">Checking forecasts and tide times…</div>`;
+  try {
+    const data = await api("/api/overview");
+    const alerts = data.alerts || [];
+    $("alertBoard").innerHTML = alerts.length ? alerts.map(alert=>`<button class="alert-card" data-location="${safe(alert.location_id)}"><span class="alert-mark">!</span><span><b>${safe(alert.location_name)} · ${fmtDate(alert.date,alert.timezone || "UTC")}</b><small>${safe(alert.message)} · ${fmtTime(alert.time,alert.timezone || "UTC")}</small></span><span class="alert-arrow">→</span></button>`).join("") : `<div class="overview-empty">No high tide and sunrise/sunset alignments expected in the next seven days.</div>`;
+    $("locationCards").innerHTML = (data.locations || []).map(row=>{
+      const scores = row.scores || {}; const photo = scores.photogenic?.score, bird = scores.birding?.score, astro = scores.astro?.score;
+      const status = row.status === "available" ? `${row.lighting?.phase || "Forecast ready"} · updated ${new Date(row.updated_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}` : "Forecast unavailable";
+      const range = row.tide_range?.maximum_m == null ? "Tide data unavailable" : `30-day tide range ${Number(row.tide_range.minimum_m).toFixed(1)}–${Number(row.tide_range.maximum_m).toFixed(1)} m`;
+      return `<button class="location-card" data-location="${safe(row.location.id)}"><span class="location-card-top"><b>${safe(row.location.name)}</b><span>Open report →</span></span><small>${safe(row.location.place_name || `${Number(row.location.latitude).toFixed(3)}, ${Number(row.location.longitude).toFixed(3)}`)}</small><span class="location-card-scores"><span>Photo <b>${photo ?? "—"}</b></span><span>Birding <b>${bird ?? "—"}</b></span><span>Astro <b>${astro ?? "—"}</b></span></span><small>${safe(status)}${row.location.shoreline ? ` · ${safe(range)}` : ""}</small></button>`;
+    }).join("");
+    document.querySelectorAll("[data-location]").forEach(button=>button.addEventListener("click",()=>{
+      state.activeId = button.dataset.location; $("locationSelect").value = state.activeId; loadReport();
+    }));
+  } catch (err) {
+    $("alertBoard").innerHTML = `<div class="overview-empty">Could not load location overview: ${safe(err.message)}</div>`;
+  }
 }
 async function loadReport(refresh = false) {
-  if (!state.activeId) return;
+  if (!state.activeId) { await loadOverview(); return; }
   setVisible("loadingState", true); setVisible("errorBanner", false);
-  setVisible("report", false);
+  setVisible("report", false); setVisible("overview", false); setVisible("homeButton", true);
   try {
     state.report = await api(`/api/report/${encodeURIComponent(state.activeId)}${refresh ? "?refresh=1" : ""}`);
     renderReport(state.report); setVisible("report", true);
@@ -86,6 +112,7 @@ function renderReport(report) {
   const loc = report.location; const tz = report.timezone || "UTC"; const light = report.lighting || {};
   $("placeName").textContent = loc.place_name || `${loc.latitude.toFixed(3)}, ${loc.longitude.toFixed(3)}`;
   $("reportTitle").textContent = loc.name;
+  $("pageTitle").innerHTML = `Find the light.<br><em>Know the moment.</em>`;
   $("phasePill").textContent = light.phase || "weather unavailable";
   $("refreshStamp").textContent = report.updated_at ? `Updated ${new Date(report.updated_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}` : "Not updated";
   $("providerStatus").innerHTML = providerStatus(report);
@@ -173,13 +200,16 @@ function renderTides(report) {
   $("tideStation").textContent = tides.station ? `${tides.station}${tides.distance_km != null ? ` · ${Number(tides.distance_km).toFixed(1)} km` : ""}` : "";
   if (!active) {
     $("tideMessage").textContent = "Enable shoreline tides in location settings to show predicted high and low tides.";
-    $("tideCalendar").innerHTML = ""; $("tideAttribution").textContent = ""; return;
+    $("tideCalendar").innerHTML = ""; $("tideAttribution").textContent = ""; setVisible("tideRange", false); return;
   }
   if (tides.status !== "available") {
     $("tideMessage").innerHTML = `<span class="warning">Tide data unavailable.</span> ${safe(tides.error || tides.detail || "No prediction events returned.")}`;
-    $("tideCalendar").innerHTML = ""; $("tideAttribution").textContent = ""; return;
+    $("tideCalendar").innerHTML = ""; $("tideAttribution").textContent = ""; setVisible("tideRange", false); return;
   }
   $("tideMessage").textContent = `${tides.station || tides.source} · ${tides.datum || "local datum"} · 30-day prediction`;
+  const range = report.tide_range || {};
+  $("tideRange").innerHTML = `<span><small>30-DAY PREDICTED LOW</small><b>${range.minimum_m == null ? "—" : `${Number(range.minimum_m).toFixed(1)} m`}</b></span><span><small>30-DAY PREDICTED HIGH</small><b>${range.maximum_m == null ? "—" : `${Number(range.maximum_m).toFixed(1)} m`}</b></span><em>Reference range for events below</em>`;
+  setVisible("tideRange", true);
   $("tideCalendar").innerHTML = (report.tide_calendar || []).map(day=>`<div class="tide-day"><div class="tide-date">${fmtDate(day.date,report.timezone)}</div><div class="tide-events">${day.events.map(event=>`<span class="tide-event ${safe(event.type)}">${safe(event.type)} ${fmtTime(event.time,report.timezone)}${event.height_m==null?"":` · ${Number(event.height_m).toFixed(1)} m`}</span>`).join("")}</div></div>`).join("") || `<div class="no-data">No tide events in the requested window.</div>`;
   $("tideAttribution").textContent = `${tides.attribution || tides.source}${tides.note ? ` · ${tides.note}` : ""}`;
 }
@@ -188,7 +218,7 @@ async function openForm(editing) {
     try {
       const saved = await api("/api/locations");
       state.locations = saved;
-      $("locationSelect").innerHTML = state.locations.map(x => `<option value="${safe(x.id)}">${safe(x.name)}${x.place_name ? ` · ${safe(x.place_name)}` : ""}</option>`).join("");
+      $("locationSelect").innerHTML = `<option value="">All locations</option>` + state.locations.map(x => `<option value="${safe(x.id)}">${safe(x.name)}${x.place_name ? ` · ${safe(x.place_name)}` : ""}</option>`).join("");
       $("locationSelect").value = state.activeId;
     } catch (err) {
       $("formError").textContent = `Could not load saved location settings: ${err.message}`;
@@ -250,7 +280,8 @@ $("locationForm").addEventListener("submit", async event=>{
     $("locationFormWrap").classList.add("hidden"); state.activeId = loc.id; await loadLocations(loc.id);
   } catch(err) { $("formError").textContent = err.message; }
 });
-$("locationSelect").addEventListener("change",async event=>{state.activeId=event.target.value;await loadReport();});
+$("locationSelect").addEventListener("change",async event=>{state.activeId=event.target.value;if(state.activeId)await loadReport();else await loadOverview();});
+$("homeButton").addEventListener("click",()=>loadOverview());
 $("newLocationButton").addEventListener("click",()=>openForm(false));
 $("emptyAddButton").addEventListener("click",()=>openForm(false));
 $("editLocationButton").addEventListener("click",()=>openForm(true));
