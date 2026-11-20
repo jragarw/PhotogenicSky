@@ -30,6 +30,16 @@ class SolarAndScoreTests(TestCase):
         self.assertEqual(len(alerts), 2)
         self.assertEqual(sum(item["type"] == "very_high_tide_near_sunset" for item in alerts), 1)
 
+    def test_tide_alerts_ignore_events_already_passed(self):
+        now = datetime.now(ZoneInfo("UTC"))
+        today = now.date().isoformat()
+        past = (now - timedelta(minutes=20)).isoformat()
+        report = {"location": {"shoreline": True}, "timezone": "UTC",
+            "tides": {"status": "available", "events": [{"type": "high", "height_m": 8}]},
+            "daily_summary": [{"date": today, "sunrise": past, "sunset": (now - timedelta(hours=3)).isoformat(),
+                "tides": [{"type": "high", "height_m": 8, "time": past}]}]}
+        self.assertEqual(server.location_tide_alerts(report), [])
+
     def test_preference_weights_normalize_and_change_photo_score(self):
         prefs = server.normalize_preferences({"photo_light": 100, "photo_sky": 0, "photo_weather": 0})
         self.assertEqual(prefs["photo_light"], 100)
@@ -251,6 +261,23 @@ class HttpApiTests(TestCase):
             token = base64.b64encode(b"tester:secret").decode()
             request = urllib.request.Request(self.base + "/api/locations", headers={"Authorization": f"Basic {token}"})
             self.assertEqual(urllib.request.urlopen(request).status, 200)
+
+    def test_overview_returns_saved_locations_and_alerts(self):
+        import urllib.request
+        from unittest.mock import patch
+        location = {"id": "coast", "name": "Coast", "latitude": 53.2, "longitude": -3.2,
+                    "shoreline": True}
+        report = {"location": location, "timezone": "Europe/London", "tides": {"status": "available", "events": [
+            {"type": "high", "height_m": 8.0}]}, "daily_summary": [{"date": "2026-11-21",
+            "sunrise": "2026-11-21T07:00", "sunset": "2026-11-21T16:00", "tides": [
+                {"type": "high", "height_m": 8.0, "time": "2026-11-21T16:30:00+00:00"}]}],
+            "scores": {}, "lighting": {}, "tide_range": {"minimum_m": 0.5, "maximum_m": 8.0}}
+        with patch.object(server.STORE, "all", return_value=[location]), \
+             patch.object(server.SERVICE, "report", return_value=report):
+            data = json_load(urllib.request.urlopen(self.base + "/api/overview"))
+        self.assertEqual(data["locations"][0]["location"]["id"], "coast")
+        self.assertEqual(data["alerts"][0]["type"], "very_high_tide_near_sunset")
+        self.assertEqual(data["alerts"][0]["timezone"], "Europe/London")
 
 
 def json_load(response):

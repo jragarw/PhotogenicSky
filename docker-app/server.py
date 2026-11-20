@@ -833,6 +833,7 @@ def location_tide_alerts(report: dict) -> list[dict]:
         return []
     timezone_name = report.get("timezone", "UTC")
     zone = ZoneInfo(timezone_name)
+    now = datetime.now(zone)
     daily = report.get("daily_summary", [])[:7]
     high_levels = [float(event["height_m"]) for event in report.get("tides", {}).get("events", [])
                    if event.get("type") == "high" and event.get("height_m") is not None]
@@ -846,12 +847,16 @@ def location_tide_alerts(report: dict) -> list[dict]:
             tide_time = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
             if tide_time.tzinfo is None:
                 tide_time = tide_time.replace(tzinfo=zone)
+            if tide_time.astimezone(zone) < now:
+                continue
             for label, raw_target in targets:
                 if not raw_target:
                     continue
                 target = datetime.fromisoformat(raw_target)
                 if target.tzinfo is None:
                     target = target.replace(tzinfo=zone)
+                if target.astimezone(zone) < now:
+                    continue
                 minutes = abs((tide_time.astimezone(timezone.utc) - target.astimezone(timezone.utc)).total_seconds()) / 60
                 is_very_high = maximum is not None and event.get("height_m") is not None and float(event["height_m"]) >= maximum * .9
                 if minutes <= 60 and not (label == "sunset" and is_very_high):
