@@ -56,18 +56,29 @@ DEFAULT_PREFERENCES = {"photo_light": 45, "photo_sky": 30, "photo_weather": 25,
 
 def normalize_preferences(value: dict | None) -> dict:
     prefs = {**DEFAULT_PREFERENCES, **(value or {})}
-    for fields in (("photo_light", "photo_sky", "photo_weather"),
-                   ("bird_evidence", "bird_light", "bird_weather"),
-                   ("astro_darkness", "astro_sky", "astro_moon")):
-        weights = [max(0, min(100, int(prefs.get(field, DEFAULT_PREFERENCES[field])))) for field in fields]
-        total = sum(weights) or 1
-        for field, weight in zip(fields, weights):
-            prefs[field] = round(weight * 100 / total)
-        # Keep each group summing to 100 after rounding.
+    for field in DEFAULT_PREFERENCES.keys() - {"sky_style"}:
+        try:
+            prefs[field] = max(0, min(100, int(prefs.get(field, DEFAULT_PREFERENCES[field]))))
+        except (ValueError, TypeError):
+            prefs[field] = DEFAULT_PREFERENCES[field]
+    if not any(prefs[field] for field in ("photo_light", "photo_sky", "photo_weather")):
+        prefs["photo_light"] = 1
+    if not any(prefs[field] for field in ("bird_evidence", "bird_light", "bird_weather")):
+        prefs["bird_evidence"] = 1
+    if not any(prefs[field] for field in ("astro_darkness", "astro_sky", "astro_moon")):
+        prefs["astro_darkness"] = 1
         prefs[fields[0]] += 100 - sum(prefs[field] for field in fields)
     if prefs.get("sky_style") not in {"clear", "dramatic"}:
         prefs["sky_style"] = "dramatic"
     return prefs
+
+
+def weighted_score(parts: dict[str, float], preferences: dict, fields: dict[str, str]) -> tuple[int, dict[str, float]]:
+    """Apply saved 0–100 importance settings as relative weights."""
+    weights = {part: preferences[field] for part, field in fields.items()}
+    total = sum(weights.values()) or 1
+    contributions = {part: round(weights[part] / total * value, 1) for part, value in parts.items()}
+    return round(sum(contributions.values())), contributions
 
 
 def http_json(url: str, params: dict | None = None, timeout: int = 18):
@@ -455,10 +466,9 @@ def photo_breakdown(day: dict, light: dict, conditions: dict, night: bool, prefe
     rain = 20 if rain is None else rain
     prefs = normalize_preferences(preferences)
     sky_score = (100 - cloud) if prefs["sky_style"] == "clear" else min(100, round(100 - abs(cloud - 55) * 1.8))
-    values = {"light": round(prefs["photo_light"] / 100 * light["score"], 1),
-              "sky": round(prefs["photo_sky"] / 100 * sky_score, 1),
-              "weather": round(prefs["photo_weather"] / 100 * (100-rain), 1)}
-    score = 0 if night else round(sum(values.values()))
+    score, values = weighted_score({"light": light["score"], "sky": sky_score, "weather": 100-rain}, prefs,
+                                   {"light": "photo_light", "sky": "photo_sky", "weather": "photo_weather"})
+    score = 0 if night else score
     return {"score": score, "formula": f"{prefs['photo_light']}% light + {prefs['photo_sky']}% {prefs['sky_style']} sky + {prefs['photo_weather']}% dry weather",
             "cloud_cover_percent": cloud, "rain_probability_percent": rain,
             "sky_score": sky_score, "preferences": prefs, "contributions": values,
@@ -474,10 +484,12 @@ def birding_score(birds: dict | None, light: dict, weather: dict, preferences: d
     coverage = min(100, round(years / 5 * 100))
     seasonal = round(.7 * richness + .3 * coverage)
     prefs = normalize_preferences(preferences)
-    parts = {"seasonal_species_evidence": round(prefs["bird_evidence"] / 100 * seasonal, 1),
-             "light_quality": round(prefs["bird_light"] / 100 * light["score"], 1),
-             "weather_suitability": round(prefs["bird_weather"] / 100 * weather["score"], 1)}
-    return {"score": round(sum(parts.values())), "seasonal_score": seasonal,
+    score, parts = weighted_score({"seasonal_species_evidence": seasonal,
+                                   "light_quality": light["score"],
+                                   "weather_suitability": weather["score"]}, prefs,
+                                  {"seasonal_species_evidence": "bird_evidence", "light_quality": "bird_light",
+                                   "weather_suitability": "bird_weather"})
+    return {"score": score, "seasonal_score": seasonal,
             "richness_score": richness, "historical_coverage_score": coverage,
             "contributions": parts,
             "preferences": prefs, "formula": f"{prefs['bird_evidence']}% regional seasonal evidence + {prefs['bird_light']}% light + {prefs['bird_weather']}% weather"}
@@ -495,10 +507,11 @@ def astro_score(elevation: float, day: dict, conditions: dict, preferences: dict
     moon_penalty = (illumination if illumination is not None else 50) if moon_visible is not False else 0
     moon_dark = 100 - moon_penalty
     prefs = normalize_preferences(preferences)
-    contributions = {"darkness": round(prefs["astro_darkness"] / 100 * darkness, 1),
-                     "clear_sky": round(prefs["astro_sky"] / 100 * (100-cloud), 1),
-                     "low_moon_illumination": round(prefs["astro_moon"] / 100 * moon_dark, 1)}
-    return {"score": round(sum(contributions.values())), "solar_elevation_degrees": round(elevation, 1),
+    score, contributions = weighted_score({"darkness": darkness, "clear_sky": 100-cloud,
+                                            "low_moon_illumination": moon_dark}, prefs,
+                                           {"darkness": "astro_darkness", "clear_sky": "astro_sky",
+                                            "low_moon_illumination": "astro_moon"})
+    return {"score": score, "solar_elevation_degrees": round(elevation, 1),
             "darkness_score": darkness, "cloud_cover_percent": cloud,
             "moon_illumination_percent": illumination, "moon_above_horizon": moon_visible,
             "moon_penalty_percent": moon_penalty,

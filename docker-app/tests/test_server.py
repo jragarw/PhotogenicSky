@@ -18,7 +18,9 @@ import server
 class SolarAndScoreTests(TestCase):
     def test_preference_weights_normalize_and_change_photo_score(self):
         prefs = server.normalize_preferences({"photo_light": 100, "photo_sky": 0, "photo_weather": 0})
-        self.assertEqual(sum(prefs[key] for key in ("photo_light", "photo_sky", "photo_weather")), 100)
+        self.assertEqual(prefs["photo_light"], 100)
+        self.assertEqual(prefs["photo_sky"], 0)
+        self.assertEqual(prefs["photo_weather"], 0)
         day = {"cloud_cover_mean": 20, "precipitation_probability_max": 10, "wind_speed_kmh": 0}
         light = {"score": 80}
         clear = server.photo_breakdown(day, light, {"cloud_cover": 20, "precipitation_probability": 10}, False, prefs)
@@ -26,6 +28,17 @@ class SolarAndScoreTests(TestCase):
         dramatic = server.photo_breakdown(day, light, {"cloud_cover": 20, "precipitation_probability": 10}, False,
             {"photo_light": 0, "photo_sky": 100, "photo_weather": 0, "sky_style": "dramatic"})
         self.assertNotEqual(clear["score"], dramatic["score"])
+
+    def test_maximum_selected_weight_survives_location_save_and_update(self):
+        with TemporaryDirectory() as directory:
+            store = server.LocationStore(Path(directory) / "locations.json")
+            prefs = {"astro_darkness": 0, "astro_sky": 100, "astro_moon": 100}
+            location = store.save({"name": "Night", "latitude": 0, "longitude": 0,
+                                   "preferences": prefs})
+            self.assertEqual(store.get(location["id"])["preferences"]["astro_sky"], 100)
+            updated = store.save({"name": "Night", "latitude": 0, "longitude": 0,
+                                  "preferences": prefs}, location["id"])
+            self.assertEqual(updated["preferences"]["astro_sky"], 100)
 
     def test_solar_elevation_changes_by_time_and_location(self):
         instant = datetime(2026, 6, 21, 12, tzinfo=timezone.utc)
