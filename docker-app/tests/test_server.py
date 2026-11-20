@@ -203,6 +203,8 @@ class StaticAssetTests(TestCase):
         references = set(re.findall(r'\$\("([^"]+)"\)', js))
         self.assertEqual(len(reader.ids), len(set(reader.ids)), "HTML IDs must be unique")
         self.assertEqual(references - set(reader.ids), set(), "JavaScript references an absent HTML element")
+        self.assertIn('api("/api/locations").then(()=>loadLocations())', js,
+                      "Startup must open the all-locations overview rather than treating fetched locations as a selection")
 
     def test_stylesheet_braces_are_balanced_and_no_external_assets(self):
         css = (server.STATIC / "styles.css").read_text(encoding="utf-8")

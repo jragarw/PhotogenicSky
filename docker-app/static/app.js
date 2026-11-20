@@ -292,4 +292,4 @@ $("deleteLocationButton").addEventListener("click",async()=>{
   try { await api(`/api/locations/${encodeURIComponent(loc.id)}`,{method:"DELETE"}); state.activeId=""; $("locationFormWrap").classList.add("hidden"); await loadLocations(); }
   catch(err) { $("formError").textContent=err.message; }
 });
-api("/api/locations").then(loadLocations).catch(err=>{$("errorBanner").textContent=err.message;setVisible("errorBanner",true);});
+api("/api/locations").then(()=>loadLocations()).catch(err=>{$("errorBanner").textContent=err.message;setVisible("errorBanner",true);});
