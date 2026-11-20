@@ -16,19 +16,47 @@ import server
 
 
 class SolarAndScoreTests(TestCase):
-    def test_tide_alerts_find_sunrise_and_very_high_sunset_alignments(self):
-        report = {
-            "location": {"shoreline": True}, "timezone": "UTC",
-            "tides": {"status": "available", "events": [
-                {"type": "high", "height_m": 9.0}, {"type": "high", "height_m": 6.0}]},
-            "daily_summary": [{"date": "2026-11-21", "sunrise": "2026-11-21T06:30",
-                "sunset": "2026-11-21T17:00", "tides": [
-                    {"type": "high", "height_m": 9.0, "time": "2026-11-21T16:30:00Z"},
-                    {"type": "high", "height_m": 6.0, "time": "2026-11-21T06:00:00Z"}]}],
-        }
+    def test_weather_forecast_fetches_fourteen_days_for_tide_alerts(self):
+        from unittest.mock import patch
+        dates = [(datetime.now(ZoneInfo("UTC")).date() + timedelta(days=offset)).isoformat() for offset in range(14)]
+        payload = {"timezone": "UTC", "daily": {"time": dates}}
+        with patch.object(server, "http_json", return_value=payload) as fetch:
+            weather = server.fetch_weather({"latitude": 0, "longitude": 0})
+        self.assertEqual(len(weather["days"]), 14)
+        self.assertEqual(fetch.call_args.args[1]["forecast_days"], 14)
+
+    def test_tide_alerts_use_fourteen_day_sunrise_and_sunset_windows(self):
+        start = datetime.now(ZoneInfo("UTC")).date() + timedelta(days=1)
+        days = []
+        high_tides = []
+        for offset in range(15):
+            day = start + timedelta(days=offset)
+            sunrise = datetime.combine(day, datetime.min.time()).replace(hour=7, tzinfo=ZoneInfo("UTC"))
+            sunset = datetime.combine(day, datetime.min.time()).replace(hour=18, tzinfo=ZoneInfo("UTC"))
+            events = []
+            if offset == 0:
+                events = [
+                    {"type": "high", "height_m": 8.0, "time": (sunrise-timedelta(hours=2)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunrise+timedelta(hours=2)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunset-timedelta(hours=3)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunset+timedelta(hours=3)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunrise+timedelta(hours=2, minutes=1)).isoformat()},
+                ]
+            if offset == 13:
+                events.append({"type": "high", "height_m": 8.0,
+                               "time": (sunset+timedelta(hours=1)).isoformat()})
+            if offset == 14:
+                events.append({"type": "high", "height_m": 8.0,
+                               "time": (sunset+timedelta(hours=1)).isoformat()})
+            high_tides.extend(events)
+            days.append({"date": day.isoformat(), "sunrise": sunrise.isoformat(),
+                         "sunset": sunset.isoformat(), "tides": events})
+        report = {"location": {"shoreline": True}, "timezone": "UTC",
+                  "tides": {"status": "available", "events": high_tides}, "daily_summary": days}
         alerts = server.location_tide_alerts(report)
-        self.assertEqual(len(alerts), 2)
-        self.assertEqual(sum(item["type"] == "very_high_tide_near_sunset" for item in alerts), 1)
+        self.assertEqual(len(alerts), 5)
+        self.assertEqual([item["sun_event"] for item in alerts[:4]], ["sunrise", "sunrise", "sunset", "sunset"])
+        self.assertTrue(all(item["date"] != days[14]["date"] for item in alerts))
 
     def test_tide_alerts_ignore_events_already_passed(self):
         now = datetime.now(ZoneInfo("UTC"))
@@ -164,8 +192,28 @@ class SolarAndScoreTests(TestCase):
         self.assertEqual([entry["date"] for entry in grouped], ["2026-11-14", "2026-11-15"])
         self.assertEqual(grouped[0]["events"][0]["type"], "high")
 
+    def test_tide_times_without_timezone_are_treated_as_gmt(self):
+        grouped = server.tide_calendar({"source": "NOAA", "events": [
+            {"time": "2026-06-01 12:00", "type": "high", "height_m": 8}]}, "Europe/London")
+        self.assertEqual(grouped[0]["events"][0]["time"], "2026-06-01T13:00:00+01:00")
+
 
 class LocationStoreTests(TestCase):
+    def test_plan_items_persist_deduplicate_and_remove(self):
+        with TemporaryDirectory() as directory:
+            store = server.LocationStore(Path(directory) / "locations.json")
+            location = store.save({"name": "Coast", "latitude": 53.27, "longitude": -3.22})
+            item = {"type": "tide", "key": "tide:high:2030-01-01T10:00", "title": "High tide",
+                    "date": "2030-01-01", "time": "2030-01-01T10:00:00Z", "details": "8.0 m"}
+            saved = store.add_plan_item(location["id"], item)
+            pin_id = saved["plan"][0]["id"]
+            duplicate = store.add_plan_item(location["id"], item)
+            self.assertEqual(len(duplicate["plan"]), 1)
+            edited = store.save({"name": "Coast edited", "latitude": 53.27, "longitude": -3.22}, location["id"])
+            self.assertEqual(edited["plan"][0]["id"], pin_id)
+            removed = store.remove_plan_item(location["id"], pin_id)
+            self.assertEqual(removed["plan"], [])
+
     def test_create_update_delete_location(self):
         with TemporaryDirectory() as directory:
             store = server.LocationStore(Path(directory) / "locations.json")
@@ -215,6 +263,7 @@ class StaticAssetTests(TestCase):
         self.assertEqual(references - set(reader.ids), set(), "JavaScript references an absent HTML element")
         self.assertIn('api("/api/locations").then(()=>loadLocations())', js,
                       "Startup must open the all-locations overview rather than treating fetched locations as a selection")
+        self.assertIn('data-plan-action', js, "Forecast, tide, and alert items should expose plan controls")
 
     def test_stylesheet_braces_are_balanced_and_no_external_assets(self):
         css = (server.STATIC / "styles.css").read_text(encoding="utf-8")
@@ -265,19 +314,42 @@ class HttpApiTests(TestCase):
     def test_overview_returns_saved_locations_and_alerts(self):
         import urllib.request
         from unittest.mock import patch
+        tomorrow = datetime.now(ZoneInfo("Europe/London")).date() + timedelta(days=1)
+        date_text = tomorrow.isoformat()
         location = {"id": "coast", "name": "Coast", "latitude": 53.2, "longitude": -3.2,
                     "shoreline": True}
         report = {"location": location, "timezone": "Europe/London", "tides": {"status": "available", "events": [
-            {"type": "high", "height_m": 8.0}]}, "daily_summary": [{"date": "2026-11-21",
-            "sunrise": "2026-11-21T07:00", "sunset": "2026-11-21T16:00", "tides": [
-                {"type": "high", "height_m": 8.0, "time": "2026-11-21T16:30:00+00:00"}]}],
+            {"type": "high", "height_m": 8.0, "time": f"{date_text}T16:30:00+00:00"}]}, "daily_summary": [{"date": date_text,
+            "sunrise": f"{date_text}T07:00", "sunset": f"{date_text}T16:00", "tides": [
+                {"type": "high", "height_m": 8.0, "time": f"{date_text}T16:30:00+00:00"}]}],
             "scores": {}, "lighting": {}, "tide_range": {"minimum_m": 0.5, "maximum_m": 8.0}}
         with patch.object(server.STORE, "all", return_value=[location]), \
              patch.object(server.SERVICE, "report", return_value=report):
             data = json_load(urllib.request.urlopen(self.base + "/api/overview"))
         self.assertEqual(data["locations"][0]["location"]["id"], "coast")
-        self.assertEqual(data["alerts"][0]["type"], "very_high_tide_near_sunset")
+        self.assertEqual(data["alerts"][0]["type"], "high_tide_near_sun")
         self.assertEqual(data["alerts"][0]["timezone"], "Europe/London")
+
+    def test_plan_api_adds_reads_and_removes_pin(self):
+        import json
+        import urllib.request
+        from unittest.mock import patch
+        location = {"id": "coast", "name": "Coast", "plan": [{"id": "pin1", "key": "tide:x"}]}
+        with patch.object(server.STORE, "add_plan_item", return_value=location) as add:
+            request = urllib.request.Request(self.base + "/api/locations/coast/plan",
+                data=json.dumps({"type":"tide","title":"High tide","key":"tide:x"}).encode(),
+                headers={"Content-Type":"application/json"}, method="POST")
+            created = json_load(urllib.request.urlopen(request))
+        self.assertEqual(created["plan"][0]["id"], "pin1")
+        self.assertEqual(add.call_args.args[0], "coast")
+        with patch.object(server.STORE, "get", return_value=location):
+            plan = json_load(urllib.request.urlopen(self.base + "/api/locations/coast/plan"))
+        self.assertEqual(plan["plan"][0]["key"], "tide:x")
+        with patch.object(server.STORE, "remove_plan_item", return_value={**location, "plan": []}) as remove:
+            request = urllib.request.Request(self.base + "/api/locations/coast/plan/pin1", method="DELETE")
+            deleted = json_load(urllib.request.urlopen(request))
+        self.assertEqual(deleted["plan"], [])
+        self.assertEqual(remove.call_args.args, ("coast", "pin1"))
 
 
 def json_load(response):

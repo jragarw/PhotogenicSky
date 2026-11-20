@@ -50,15 +50,17 @@
       <div id="errorBanner" class="error-banner hidden" role="status"></div>
 
       <section id="overview" class="overview hidden">
-        <div class="section-heading"><div><p class="eyebrow">YOUR PLANNING LOCATIONS</p><h2>Coming up</h2></div><span class="section-note">Alerts from the next seven days</span></div>
+        <div class="section-heading"><div><p class="eyebrow">YOUR PLANNING LOCATIONS</p><h2>Coming up</h2></div><span class="section-note">Tide and sun alerts from the next 14 days</span></div>
         <div id="alertBoard" class="alert-board"></div>
         <div id="locationCards" class="location-cards"></div>
       </section>
 
       <section id="report" class="hidden">
-        <div class="report-heading"><div><div class="place-line"><span id="placeName"></span><span id="phasePill" class="phase-pill"></span></div><h2 id="reportTitle">—</h2><p id="reportSub" class="muted">Seven-day weather · seasonal bird evidence · photographic light</p></div><button id="editLocationButton" class="button button-quiet">Edit location</button></div>
+        <div class="report-heading"><div><div class="place-line"><span id="placeName"></span><span id="phasePill" class="phase-pill"></span></div><h2 id="reportTitle">—</h2><p id="reportSub" class="muted">14-day weather · seasonal bird evidence · photographic light</p></div><button id="editLocationButton" class="button button-quiet">Edit location</button></div>
 
         <div id="providerStatus" class="provider-strip"></div>
+
+        <section class="section-block plan-section"><div class="section-heading"><div><p class="eyebrow">SAVED FOR THIS LOCATION</p><h2>Your plan</h2></div><span id="planCount" class="section-note">0 items</span></div><div id="pinnedPlan" class="pinned-plan"></div></section>
 
         <section class="score-grid" aria-label="Current and upcoming scores">
           <article class="score-card photo-card"><div class="score-card-top"><span class="score-icon">◉</span><span id="photoKicker" class="card-kicker">BEST UPCOMING DAYLIGHT WINDOW</span></div><div class="score-line"><strong id="photoScore">—</strong><span>/100</span></div><div id="photoWhen" class="score-when">No daylight window available</div><p id="photoWhy" class="score-why">Score details appear when weather data is available.</p><div id="photoContributions" class="contribution-list"></div></article>
@@ -76,7 +78,7 @@
         </section>
 
         <section class="section-block forecast-section">
-          <div class="section-heading"><div><p class="eyebrow">PLAN THE NEXT WEEK</p><h2>Days at a glance</h2></div><span class="section-note">Best moments, key times, tides and seasonal bird outlook</span></div>
+          <div class="section-heading"><div><p class="eyebrow">PLAN THE NEXT TWO WEEKS</p><h2>Days at a glance</h2></div><span class="section-note">Best moments, key times, tides and seasonal bird outlook</span></div>
           <div id="forecastTable" class="forecast-list"></div>
         </section>
 

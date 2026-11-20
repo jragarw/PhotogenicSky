@@ -34,6 +34,55 @@ function setVisible(id, visible) { $(id).classList.toggle("hidden", !visible); }
 function currentLocation() { return state.locations.find(x => x.id === state.activeId); }
 const preferenceFields = ["photo_light","photo_sky","photo_weather","bird_evidence","bird_light","bird_weather","astro_darkness","astro_sky","astro_moon"];
 
+function planButton(item, locationId = state.activeId) {
+  const location = state.locations.find(x => x.id === locationId);
+  const saved = (location?.plan || []).some(pin => pin.key === item.key);
+  return `<button type="button" class="pin-button ${saved ? "is-pinned" : ""}" data-plan-action="${saved ? "remove" : "add"}" data-location-id="${safe(locationId)}" data-plan-key="${safe(item.key)}" data-plan-item="${safe(JSON.stringify(item))}" aria-label="${saved ? "Remove from" : "Pin to"} plan">${saved ? "Pinned ✓" : "＋ Pin to plan"}</button>`;
+}
+
+function renderPlan() {
+  const pins = [...(state.report?.location?.plan || [])].sort((a,b)=>{
+    const localKey = item => `${item.date || item.time?.slice(0,10) || ""}T${item.time?.match(/T(\d{2}:\d{2})/)?.[1] || "00:00"}`;
+    const left = localKey(a);
+    const right = localKey(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+  $("planCount").textContent = `${pins.length} ${pins.length === 1 ? "item" : "items"}`;
+  $("pinnedPlan").innerHTML = pins.length ? pins.map(pin=>`<article class="plan-item"><div><b>${safe(pin.title)}</b><small>${safe(pin.date ? fmtDate(pin.date,state.report.timezone) : "")}${pin.time ? ` · ${safe(fmtTime(pin.time,state.report.timezone))}` : ""}${pin.details ? ` · ${safe(pin.details)}` : ""}</small></div><button class="pin-remove" data-plan-action="remove" data-location-id="${safe(state.activeId)}" data-plan-id="${safe(pin.id)}">Remove</button></article>`).join("") : `<div class="overview-empty">Pin tide times, alerts, or photo, birding and astro moments here to build a plan for this location.</div>`;
+  bindPlanButtons($("pinnedPlan"));
+}
+
+function updatePlanState(location) {
+  const index = state.locations.findIndex(item => item.id === location.id);
+  if (index >= 0) state.locations[index] = location;
+  if (state.report?.location?.id === location.id) state.report.location.plan = location.plan || [];
+}
+
+function bindPlanButtons(container = document) {
+  container.querySelectorAll("[data-plan-action]").forEach(button => button.addEventListener("click", async event => {
+    event.stopPropagation();
+    const locationId = button.dataset.locationId || state.activeId;
+    try {
+      let location;
+      if (button.dataset.planAction === "remove") {
+        const planId = button.dataset.planId || (state.locations.find(item => item.id === locationId)?.plan || []).find(pin => pin.key === button.dataset.planKey)?.id;
+        if (!planId) return;
+        location = await api(`/api/locations/${encodeURIComponent(locationId)}/plan/${encodeURIComponent(planId)}`, {method:"DELETE"});
+      } else {
+        location = await api(`/api/locations/${encodeURIComponent(locationId)}/plan`, {method:"POST", body:button.dataset.planItem});
+      }
+      updatePlanState(location);
+      if (state.report?.location?.id === locationId) {
+        renderPlan(); renderTides(state.report); renderForecast(state.report);
+      } else if ($("overview").classList.contains("hidden") === false) {
+        await loadOverview();
+      }
+    } catch (err) {
+      button.textContent = `Could not save: ${err.message}`;
+    }
+  }));
+}
+
 async function loadLocations(preferredId) {
   state.locations = await api("/api/locations");
   const select = $("locationSelect");
@@ -58,17 +107,19 @@ async function loadOverview() {
   $("alertBoard").innerHTML = `<div class="overview-empty">Checking forecasts and tide times…</div>`;
   try {
     const data = await api("/api/overview");
+    for (const row of data.locations || []) updatePlanState(row.location);
     const alerts = data.alerts || [];
-    $("alertBoard").innerHTML = alerts.length ? alerts.map(alert=>`<button class="alert-card" data-location="${safe(alert.location_id)}"><span class="alert-mark">!</span><span><b>${safe(alert.location_name)} · ${fmtDate(alert.date,alert.timezone || "UTC")}</b><small>${safe(alert.message)} · ${fmtTime(alert.time,alert.timezone || "UTC")}</small></span><span class="alert-arrow">→</span></button>`).join("") : `<div class="overview-empty">No high tide and sunrise/sunset alignments expected in the next seven days.</div>`;
+    $("alertBoard").innerHTML = alerts.length ? alerts.map(alert=>`<div class="alert-card"><button class="alert-open" data-location="${safe(alert.location_id)}"><span class="alert-mark">!</span><span><b>${safe(alert.location_name)} · ${fmtDate(alert.date,alert.timezone || "UTC")}</b><small>${safe(alert.message)} · ${fmtTime(alert.time,alert.timezone || "UTC")}</small></span><span class="alert-arrow">→</span></button>${planButton({key:`alert:${alert.type}:${alert.date}:${alert.time}`,type:"alert",title:`${alert.location_name}: ${alert.message}`,date:alert.date,time:alert.time,details:"Tide and sun alignment"},alert.location_id)}</div>`).join("") : `<div class="overview-empty">No high tide and sunrise/sunset alignments expected in the next 14 days.</div>`;
     $("locationCards").innerHTML = (data.locations || []).map(row=>{
       const scores = row.scores || {}; const photo = scores.photogenic?.score, bird = scores.birding?.score, astro = scores.astro?.score;
       const status = row.status === "available" ? `${row.lighting?.phase || "Forecast ready"} · updated ${new Date(row.updated_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}` : "Forecast unavailable";
       const range = row.tide_range?.maximum_m == null ? "Tide data unavailable" : `30-day tide range ${Number(row.tide_range.minimum_m).toFixed(1)}–${Number(row.tide_range.maximum_m).toFixed(1)} m`;
       return `<button class="location-card" data-location="${safe(row.location.id)}"><span class="location-card-top"><b>${safe(row.location.name)}</b><span>Open report →</span></span><small>${safe(row.location.place_name || `${Number(row.location.latitude).toFixed(3)}, ${Number(row.location.longitude).toFixed(3)}`)}</small><span class="location-card-scores"><span>Photo <b>${photo ?? "—"}</b></span><span>Birding <b>${bird ?? "—"}</b></span><span>Astro <b>${astro ?? "—"}</b></span></span><small>${safe(status)}${row.location.shoreline ? ` · ${safe(range)}` : ""}</small></button>`;
     }).join("");
-    document.querySelectorAll("[data-location]").forEach(button=>button.addEventListener("click",()=>{
+    document.querySelectorAll(".alert-open,[data-location].location-card").forEach(button=>button.addEventListener("click",()=>{
       state.activeId = button.dataset.location; $("locationSelect").value = state.activeId; loadReport();
     }));
+    bindPlanButtons($("alertBoard")); bindPlanButtons($("locationCards"));
   } catch (err) {
     $("alertBoard").innerHTML = `<div class="overview-empty">Could not load location overview: ${safe(err.message)}</div>`;
   }
@@ -79,6 +130,7 @@ async function loadReport(refresh = false) {
   setVisible("report", false); setVisible("overview", false); setVisible("homeButton", true);
   try {
     state.report = await api(`/api/report/${encodeURIComponent(state.activeId)}${refresh ? "?refresh=1" : ""}`);
+    updatePlanState(state.report.location);
     renderReport(state.report); setVisible("report", true);
   } catch (err) {
     $("errorBanner").textContent = `Could not load this report: ${err.message}`;
@@ -116,6 +168,7 @@ function renderReport(report) {
   $("phasePill").textContent = light.phase || "weather unavailable";
   $("refreshStamp").textContent = report.updated_at ? `Updated ${new Date(report.updated_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}` : "Not updated";
   $("providerStatus").innerHTML = providerStatus(report);
+  renderPlan();
   const bestPhoto = report.best_photo; const bestBird = report.best_birding; const bestAstro = report.best_astro;
   renderScore("photo", bestPhoto, "photogenic", {light:"light",clear_sky:"clear sky",dry_weather:"low rain"});
   renderScore("bird", bestBird, "birding", {seasonal_species_evidence:"bird evidence",light_quality:"light",weather_suitability:"weather"});
@@ -178,7 +231,9 @@ function renderForecast(report) {
       const moon = o.astro?.moon_illumination_percent == null ? "moon —" : `moon ${o.astro.moon_illumination_percent}%`;
       const lightScore = o.light?.score;
       const explain = o.astro ? o.summary : `${o.summary} Inputs: ${cloud}, ${rain}, ${wind}. Solar elevation ${o.solar_elevation_degrees}°.`;
-      return `<article class="window-card"><div class="window-top"><b>${safe(o.window.toUpperCase())} · ${fmtTime(o.time,report.timezone)}</b><span class="window-score" style="color:${scoreTone(scoreValue)}">${safe(scoreLabel)}</span></div><p>${safe(explain)}</p><div class="window-inputs"><span>light ${safe(lightScore ?? "—")}</span><span>${safe(cloud)}</span><span>${safe(rain)}</span><span>${safe(wind)}</span>${o.astro?`<span>${safe(moon)}</span>`:""}${o.birding?.score!=null?`<span>birds ${safe(o.birding.score)}</span>`:""}</div></article>`;
+      const details = [o.astro ? `Astro ${o.astro.score}` : `Photo ${o.photogenic.score}`, o.birding?.score != null ? `Birding ${o.birding.score}` : "", cloud, rain, wind].filter(Boolean).join(" · ");
+      const pin = {key:`opportunity:${o.date}:${o.window}`,type:"opportunity",title:`${o.window[0].toUpperCase()+o.window.slice(1)} photography and wildlife`,date:o.date,time:o.time,details};
+      return `<article class="window-card"><div class="window-top"><b>${safe(o.window.toUpperCase())} · ${fmtTime(o.time,report.timezone)}</b><span class="window-score" style="color:${scoreTone(scoreValue)}">${safe(scoreLabel)}</span></div><p>${safe(explain)}</p><div class="window-inputs"><span>light ${safe(lightScore ?? "—")}</span><span>${safe(cloud)}</span><span>${safe(rain)}</span><span>${safe(wind)}</span>${o.astro?`<span>${safe(moon)}</span>`:""}${o.birding?.score!=null?`<span>birds ${safe(o.birding.score)}</span>`:""}</div>${planButton(pin)}</article>`;
     }).join("");
     const highLow = day.temperature_max_c == null ? "—" : `${Math.round(day.temperature_max_c)}° / ${Math.round(day.temperature_min_c)}°`;
     const top = [day.photo && `Photo ${day.photo.photogenic.score}`, day.birding && `Birding ${day.birding.birding.score}`, day.astro && `Astro ${day.astro.astro.score}`].filter(Boolean).join(" · ") || "No score";
@@ -187,6 +242,7 @@ function renderForecast(report) {
     const keyTimes = `Sunrise ${fmtTime(day.sunrise,report.timezone)} · Noon ${fmtTime(day.solar_noon,report.timezone)} · Sunset ${fmtTime(day.sunset,report.timezone)} · Moon ${fmtTime(day.moonrise,report.timezone)} / ${fmtTime(day.moonset,report.timezone)}`;
     return `<details class="forecast-day" ${index===0?"open":""}><summary><span class="day-name">${fmtDate(day.date,report.timezone)}</span><span class="day-condition">${safe(day.condition)} · ${safe(highLow)}</span><span class="day-summary"><span>Rain <b>${day.precipitation_probability_max ?? "—"}%</b></span><span>Wind <b>${day.wind_speed_kmh ?? "—"}</b></span></span><span class="day-best">${safe(top)}</span><span class="chevron">⌄</span></summary><div class="daily-lineup"><div><b>Best photo</b><span>${safe(opportunityText(day.photo,"photogenic",report.timezone))}</span></div><div><b>Birding</b><span>${safe(opportunityText(day.birding,"birding",report.timezone))} · ${safe(birdEvidence)}</span></div><div><b>Astro</b><span>${safe(opportunityText(day.astro,"astro",report.timezone))}</span></div><div><b>Key times</b><span>${safe(keyTimes)}</span></div><div><b>Tides · local day</b><span>${tides}</span></div></div><div class="window-grid">${opportunitiesHtml || `<div class="no-data">No photo or night windows returned for this date.</div>`}</div></details>`;
   }).join("");
+  bindPlanButtons($("forecastTable"));
 }
 function renderBirds(report) {
   const birds = report.bird_outlook || {}; const available = birds.status === "seasonal_records" || birds.status === "no_records";
@@ -210,7 +266,8 @@ function renderTides(report) {
   const range = report.tide_range || {};
   $("tideRange").innerHTML = `<span><small>30-DAY PREDICTED LOW</small><b>${range.minimum_m == null ? "—" : `${Number(range.minimum_m).toFixed(1)} m`}</b></span><span><small>30-DAY PREDICTED HIGH</small><b>${range.maximum_m == null ? "—" : `${Number(range.maximum_m).toFixed(1)} m`}</b></span><em>Reference range for events below</em>`;
   setVisible("tideRange", true);
-  $("tideCalendar").innerHTML = (report.tide_calendar || []).map(day=>`<div class="tide-day"><div class="tide-date">${fmtDate(day.date,report.timezone)}</div><div class="tide-events">${day.events.map(event=>`<span class="tide-event ${safe(event.type)}">${safe(event.type)} ${fmtTime(event.time,report.timezone)}${event.height_m==null?"":` · ${Number(event.height_m).toFixed(1)} m`}</span>`).join("")}</div></div>`).join("") || `<div class="no-data">No tide events in the requested window.</div>`;
+  $("tideCalendar").innerHTML = (report.tide_calendar || []).map(day=>`<div class="tide-day"><div class="tide-date">${fmtDate(day.date,report.timezone)}</div><div class="tide-events">${day.events.map(event=>`<span class="tide-event-wrap"><span class="tide-event ${safe(event.type)}">${safe(event.type)} ${fmtTime(event.time,report.timezone)}${event.height_m==null?"":` · ${Number(event.height_m).toFixed(1)} m`}</span>${planButton({key:`tide:${event.type}:${event.time}`,type:"tide",title:`${event.type[0].toUpperCase()+event.type.slice(1)} tide`,date:day.date,time:event.time,details:event.height_m == null ? "" : `${Number(event.height_m).toFixed(1)} m`})}</span>`).join("")}</div></div>`).join("") || `<div class="no-data">No tide events in the requested window.</div>`;
+  bindPlanButtons($("tideCalendar"));
   $("tideAttribution").textContent = `${tides.attribution || tides.source}${tides.note ? ` · ${tides.note}` : ""}`;
 }
 async function openForm(editing) {

@@ -123,7 +123,7 @@ def fetch_weather(location: dict) -> dict:
         "latitude": location["latitude"], "longitude": location["longitude"],
         "daily": DAILY, "hourly": HOURLY,
         "current": "cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high",
-        "timezone": "auto", "forecast_days": 7,
+        "timezone": "auto", "forecast_days": 14,
     })
     daily, hourly = payload.get("daily", {}), payload.get("hourly", {})
     if not daily.get("time"):
@@ -600,7 +600,7 @@ def tide_calendar(tides: dict, timezone_name: str) -> list[dict]:
     zone = ZoneInfo(timezone_name)
     grouped: dict[str, list[dict]] = {}
     for event in tides.get("events", []):
-        moment = datetime.fromisoformat(event["time"].replace("Z", "+00:00")).astimezone(zone)
+        moment = parse_tide_datetime(event["time"]).astimezone(zone)
         grouped.setdefault(moment.date().isoformat(), []).append({
             "time": moment.isoformat(), "type": event.get("type"), "height_m": event.get("height_m"),
         })
@@ -615,13 +615,19 @@ def tide_context(value: str | None, tides: dict, timezone_name: str) -> dict | N
         target = target.replace(tzinfo=ZoneInfo(timezone_name))
     events = []
     for item in tides["events"]:
-        moment = datetime.fromisoformat(item["time"].replace("Z", "+00:00"))
+        moment = parse_tide_datetime(item["time"])
         events.append((abs((moment-target.astimezone(timezone.utc)).total_seconds()), item, moment))
     distance, event, moment = min(events, key=lambda x: x[0])
     if distance > 3*60*60:
         return None
     return {"type": event["type"], "time": moment.astimezone(ZoneInfo(timezone_name)).isoformat(),
             "height_m": event.get("height_m"), "minutes_from_sun_time": round((moment-target.astimezone(timezone.utc)).total_seconds()/60)}
+
+
+def parse_tide_datetime(value: str) -> datetime:
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    # NOAA predictions are requested in GMT and may omit the trailing Z.
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
 
 
 def solar_noon_time(sunrise: str | None, sunset: str | None) -> str | None:
@@ -656,6 +662,7 @@ class LocationStore:
             locations = self._read()
             for item in locations:
                 item["preferences"] = normalize_preferences(item.get("preferences"))
+                item["plan"] = [entry for entry in item.get("plan", []) if isinstance(entry, dict)] if isinstance(item.get("plan"), list) else []
             return locations
 
     def get(self, location_id: str) -> dict | None:
@@ -699,6 +706,7 @@ class LocationStore:
                 "lookahead_days": days, "radius_km": radius,
                 "shoreline": bool(payload.get("shoreline", False)),
                 "preferences": preferences,
+                "plan": (previous or {}).get("plan", []) if isinstance((previous or {}).get("plan", []), list) else [],
             }
             existing = next((i for i, item in enumerate(locations) if item["id"] == location["id"]), None)
             if existing is None:
@@ -707,6 +715,42 @@ class LocationStore:
                 locations[existing] = location
             self._write(locations)
         return location
+
+    def add_plan_item(self, location_id: str, payload: dict) -> dict | None:
+        item_type = str(payload.get("type", ""))
+        if item_type not in {"tide", "alert", "opportunity"}:
+            raise ValueError("Plan item type must be tide, alert, or opportunity.")
+        title = str(payload.get("title", "")).strip()[:120]
+        key = str(payload.get("key", "")).strip()[:180]
+        if not title or not key:
+            raise ValueError("Plan items need a title and a stable key.")
+        item = {"id": uuid.uuid4().hex[:12], "key": key, "type": item_type,
+                "title": title, "date": str(payload.get("date", ""))[:20],
+                "time": str(payload.get("time", ""))[:40],
+                "details": str(payload.get("details", ""))[:300]}
+        with self.lock:
+            locations = self._read()
+            location = next((row for row in locations if row["id"] == location_id), None)
+            if not location:
+                return None
+            plan = [entry for entry in location.get("plan", []) if isinstance(entry, dict)] if isinstance(location.get("plan"), list) else []
+            existing = next((entry for entry in plan if entry.get("key") == key), None)
+            if existing:
+                return location
+            location["plan"] = [*plan, item]
+            self._write(locations)
+            return location
+
+    def remove_plan_item(self, location_id: str, item_id: str) -> dict | None:
+        with self.lock:
+            locations = self._read()
+            location = next((row for row in locations if row["id"] == location_id), None)
+            if not location:
+                return None
+            plan = [entry for entry in location.get("plan", []) if isinstance(entry, dict)] if isinstance(location.get("plan"), list) else []
+            location["plan"] = [entry for entry in plan if entry.get("id") != item_id]
+            self._write(locations)
+            return location
 
     def delete(self, location_id: str) -> bool:
         with self.lock:
@@ -733,6 +777,7 @@ class ReportService:
         with self.lock:
             cached = self.cache.get(location_id)
             if cached and not refresh and now_tick - cached[0] < self.cache_seconds:
+                cached[1]["location"] = location
                 return cached[1]
         report = self._build(location)
         with self.lock:
@@ -769,7 +814,8 @@ class ReportService:
         if weather["status"] != "available":
             return {"location": location, "providers": providers, "bird_outlook": birds, "tides": tides,
                     "timezone": timezone_name, "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "error": weather.get("error", "Weather data is unavailable"), "opportunities": [], "tide_calendar": []}
+                    "error": weather.get("error", "Weather data is unavailable"), "opportunities": [],
+                    "tide_calendar": [], "daily_summary": []}
         lighting = current_lighting(weather, location)
         opportunities = build_opportunities(weather, birds, location)
         daytime = [x for x in opportunities if x["photogenic"]["score"] > 0]
@@ -828,25 +874,21 @@ SERVICE = ReportService(STORE)
 
 
 def location_tide_alerts(report: dict) -> list[dict]:
-    """Find high tide/sun alignments in the seven-day weather forecast."""
+    """Find high tides at sunrise or within two hours, and sunset or within three."""
     if not report.get("location", {}).get("shoreline") or report.get("tides", {}).get("status") != "available":
         return []
     timezone_name = report.get("timezone", "UTC")
     zone = ZoneInfo(timezone_name)
     now = datetime.now(zone)
-    daily = report.get("daily_summary", [])[:7]
-    high_levels = [float(event["height_m"]) for event in report.get("tides", {}).get("events", [])
-                   if event.get("type") == "high" and event.get("height_m") is not None]
-    maximum = max(high_levels, default=None)
+    daily = report.get("daily_summary", [])[:14]
+    high_tides = [event for event in report.get("tides", {}).get("events", []) if event.get("type") == "high"]
     alerts = []
     for day in daily:
         targets = [("sunrise", day.get("sunrise")), ("sunset", day.get("sunset"))]
-        for event in day.get("tides", []):
-            if event.get("type") != "high":
+        for event in high_tides:
+            if not event.get("time"):
                 continue
-            tide_time = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
-            if tide_time.tzinfo is None:
-                tide_time = tide_time.replace(tzinfo=zone)
+            tide_time = parse_tide_datetime(event["time"])
             if tide_time.astimezone(zone) < now:
                 continue
             for label, raw_target in targets:
@@ -857,18 +899,15 @@ def location_tide_alerts(report: dict) -> list[dict]:
                     target = target.replace(tzinfo=zone)
                 if target.astimezone(zone) < now:
                     continue
-                minutes = abs((tide_time.astimezone(timezone.utc) - target.astimezone(timezone.utc)).total_seconds()) / 60
-                is_very_high = maximum is not None and event.get("height_m") is not None and float(event["height_m"]) >= maximum * .9
-                if minutes <= 60 and not (label == "sunset" and is_very_high):
+                offset_minutes = (tide_time.astimezone(timezone.utc) - target.astimezone(timezone.utc)).total_seconds() / 60
+                window_minutes = 120 if label == "sunrise" else 180
+                if abs(offset_minutes) <= window_minutes:
+                    relation = "at" if abs(offset_minutes) < 1 else f"{abs(round(offset_minutes))} min {'after' if offset_minutes > 0 else 'before'}"
+                    height = f" · {float(event['height_m']):.1f} m" if event.get("height_m") is not None else ""
                     alerts.append({"type": "high_tide_near_sun", "date": day["date"], "time": tide_time.astimezone(zone).isoformat(),
-                                   "sun_event": label, "minutes_from_sun_event": round(minutes),
+                                   "sun_event": label, "minutes_from_sun_event": round(offset_minutes),
                                    "height_m": event.get("height_m"),
-                                   "message": f"High tide near {label} ({round(minutes)} min apart)"})
-                if label == "sunset" and minutes <= 60 and is_very_high:
-                    alerts.append({"type": "very_high_tide_near_sunset", "date": day["date"], "time": tide_time.astimezone(zone).isoformat(),
-                                   "sun_event": label, "minutes_from_sun_event": round(minutes),
-                                   "height_m": event.get("height_m"), "reference_max_m": maximum,
-                                   "message": f"Very high tide near sunset ({float(event['height_m']):.1f} m; 30-day max {maximum:.1f} m)"})
+                                   "message": f"High tide {relation} {label}{height}"})
     return alerts
 
 
@@ -929,6 +968,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"status": "ok", "version": APP_VERSION})
         if path == "/api/locations":
             return self._json(200, STORE.all())
+        plan_match = re.fullmatch(r"/api/locations/([a-zA-Z0-9_-]+)/plan", path)
+        if plan_match:
+            location = STORE.get(plan_match.group(1))
+            return self._json(200 if location else 404,
+                              {"plan": location.get("plan", [])} if location else {"error": "Location not found"})
         if path == "/api/overview":
             locations = STORE.all()
             with ThreadPoolExecutor(max_workers=min(4, max(1, len(locations)))) as pool:
@@ -1002,6 +1046,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/locations":
                 item = STORE.save(payload)
                 return self._json(201, item)
+            plan_match = re.fullmatch(r"/api/locations/([a-zA-Z0-9_-]+)/plan", path)
+            if plan_match:
+                location = STORE.add_plan_item(plan_match.group(1), payload)
+                return self._json(201 if location else 404,
+                                  location if location else {"error": "Location not found"})
             if path == "/api/locations/geocode":
                 return self._json(200, {"results": geocode(payload.get("query", ""))})
             return self._json(404, {"error": "Not found"})
@@ -1028,6 +1077,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
         path = urlparse(self.path).path
+        plan_match = re.fullmatch(r"/api/locations/([a-zA-Z0-9_-]+)/plan/([a-zA-Z0-9_-]+)", path)
+        if plan_match:
+            location = STORE.remove_plan_item(plan_match.group(1), plan_match.group(2))
+            return self._json(200 if location else 404,
+                              location if location else {"error": "Location not found"})
         match = re.fullmatch(r"/api/locations/([a-zA-Z0-9_-]+)", path)
         if not match:
             return self._json(404, {"error": "Not found"})

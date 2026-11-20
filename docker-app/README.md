@@ -24,13 +24,14 @@ The app refreshes provider data when a report is opened and caches each location
 
 ## What the report shows
 
-- **Photogenic score:** the best upcoming daylight window in the seven-day forecast. Its explanation shows the light, clear-sky, and dry-weather contributions and their forecast inputs.
+- **Photogenic score:** the best upcoming daylight window in the 14-day forecast. Its explanation shows the light, clear-sky, and dry-weather contributions and their forecast inputs.
 - **Birding score:** regional historical bird evidence, shared light quality, and weather suitability. The browser lists the leading species and evidence totals. GBIF records are historical observations for matching calendar dates in the preceding five years, not a live count or forecast.
 - **Astrophotography score:** forecast night windows only after the Sun falls below −6° solar elevation (the end of blue hour). The daylight score is zero in those windows; the astro score accounts for darkness, cloud, and moonlight. A bright Moon above the horizon reduces the score; a Moon below the horizon adds no moonlight penalty.
-- **Light and weather:** current solar phase/elevation, total and low/mid/high cloud cover, sunrise, solar noon, sunset, UV, seven-day weather, and the detailed conditions at each planning window.
+- **Light and weather:** current solar phase/elevation, total and low/mid/high cloud cover, sunrise, solar noon, sunset, UV, 14-day weather, and the detailed conditions at each planning window.
 - **Tide calendar:** 30 days of local high/low events when shoreline is enabled, plus tide context near today’s sunrise and sunset.
 - **Daily lineup:** each forecast day groups its best photo, birding, and astro windows with key sun/moon times, matching local tide events, and regional seasonal bird evidence.
-- **Location overview:** the landing page lists saved locations and highlights high tides within an hour of sunrise or sunset, plus very high tides close to sunset. The detailed tide pane shows the lowest and highest predictions across the 30-day tide forecast as context for individual events.
+- **Location overview:** the landing page lists saved locations and highlights high tides at sunrise or within two hours, and at sunset or within three hours, over the next 14 days. The detailed tide pane shows the lowest and highest predictions across the 30-day tide forecast as context for individual events.
+- **Pinned plan:** pin tide events, overview alerts, and forecast photo/birding/astro windows. Pins are saved per location and can be removed from the plan.
 - **Location scoring preferences:** set the relative weights for light, sky, and weather by activity using sliders. Photography defaults to dramatic broken cloud and can be switched to clear skies; birding can emphasize historical seasonal evidence; astro can emphasize darkness, clear sky, or moonlight. Each activity's weights are normalized to 100%.
 
 Scores are comparative planning guides, not guarantees. Tide predictions are harmonic estimates and are not for navigation; check the station and datum before relying on tide heights.
@@ -77,7 +78,9 @@ Providers refresh independently. If one fails, its status and error are shown in
 - `PUT /api/locations/{id}` · update a location
 - `DELETE /api/locations/{id}`
 - `GET /api/report/{id}` · complete report and score explanations (`?refresh=1` bypasses cache)
-- `GET /api/overview` · saved locations and seven-day tide/sun alignment alerts
+- `GET /api/overview` · saved locations and 14-day tide/sun alignment alerts
+- `GET /api/locations/{id}/plan` · saved plan items for one location
+- `POST /api/locations/{id}/plan` and `DELETE /api/locations/{id}/plan/{pin-id}` · manage a location's pinned plan
 - `GET /api/glance/{id}` · compact dashboard payload
 - `PUT /api/locations/{id}` accepts a `preferences` object for photo, birding, and astro weights plus `sky_style` (`clear` or `dramatic`). Existing locations receive default preferences.
 - `GET /api/geocode?q=<place>` · place search
