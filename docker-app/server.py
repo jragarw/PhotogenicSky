@@ -48,6 +48,26 @@ WEATHER_CODES = {
     81: "Rain showers", 82: "Heavy rain showers", 85: "Snow showers", 86: "Heavy snow showers",
     95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with heavy hail",
 }
+DEFAULT_PREFERENCES = {"photo_light": 45, "photo_sky": 30, "photo_weather": 25,
+                       "bird_evidence": 50, "bird_light": 25, "bird_weather": 25,
+                       "astro_darkness": 55, "astro_sky": 35, "astro_moon": 10,
+                       "sky_style": "clear"}
+
+
+def normalize_preferences(value: dict | None) -> dict:
+    prefs = {**DEFAULT_PREFERENCES, **(value or {})}
+    for fields in (("photo_light", "photo_sky", "photo_weather"),
+                   ("bird_evidence", "bird_light", "bird_weather"),
+                   ("astro_darkness", "astro_sky", "astro_moon")):
+        weights = [max(0, min(100, int(prefs.get(field, DEFAULT_PREFERENCES[field])))) for field in fields]
+        total = sum(weights) or 1
+        for field, weight in zip(fields, weights):
+            prefs[field] = round(weight * 100 / total)
+        # Keep each group summing to 100 after rounding.
+        prefs[fields[0]] += 100 - sum(prefs[field] for field in fields)
+    if prefs.get("sky_style") not in {"clear", "dramatic"}:
+        prefs["sky_style"] = "clear"
+    return prefs
 
 
 def http_json(url: str, params: dict | None = None, timeout: int = 18):
@@ -393,7 +413,7 @@ def weather_breakdown(day: dict, conditions: dict) -> dict:
             "formula": "45% low rain probability + 30% low wind + 25% low cloud cover"}
 
 
-def photo_breakdown(day: dict, light: dict, conditions: dict, night: bool) -> dict:
+def photo_breakdown(day: dict, light: dict, conditions: dict, night: bool, preferences: dict | None = None) -> dict:
     cloud = conditions.get("cloud_cover")
     if cloud is None:
         cloud = day.get("cloud_cover_mean")
@@ -402,17 +422,19 @@ def photo_breakdown(day: dict, light: dict, conditions: dict, night: bool) -> di
     if rain is None:
         rain = day.get("precipitation_probability_max")
     rain = 20 if rain is None else rain
-    values = {"light": round(.55 * light["score"], 1),
-              "clear_sky": round(.30 * (100-cloud), 1),
-              "dry_weather": round(.15 * (100-rain), 1)}
+    prefs = normalize_preferences(preferences)
+    sky_score = (100 - cloud) if prefs["sky_style"] == "clear" else min(100, round(100 - abs(cloud - 55) * 1.8))
+    values = {"light": round(prefs["photo_light"] / 100 * light["score"], 1),
+              "sky": round(prefs["photo_sky"] / 100 * sky_score, 1),
+              "weather": round(prefs["photo_weather"] / 100 * (100-rain), 1)}
     score = 0 if night else round(sum(values.values()))
-    return {"score": score, "formula": "55% light quality + 30% clear sky + 15% low rain probability",
+    return {"score": score, "formula": f"{prefs['photo_light']}% light + {prefs['photo_sky']}% {prefs['sky_style']} sky + {prefs['photo_weather']}% dry weather",
             "cloud_cover_percent": cloud, "rain_probability_percent": rain,
-            "contributions": values,
+            "sky_score": sky_score, "preferences": prefs, "contributions": values,
             "night_gate": "Sun is below -6°; daylight photography is inactive." if night else None}
 
 
-def birding_score(birds: dict | None, light: dict, weather: dict) -> dict:
+def birding_score(birds: dict | None, light: dict, weather: dict, preferences: dict | None = None) -> dict:
     if not birds or not birds.get("species"):
         return {"score": None, "reason": "No historical seasonal species evidence is available for this region and date window."}
     count = birds.get("species_count", len(birds["species"]))
@@ -420,16 +442,17 @@ def birding_score(birds: dict | None, light: dict, weather: dict) -> dict:
     richness = min(100, round(100 * log1p(count) / log1p(500)))
     coverage = min(100, round(years / 5 * 100))
     seasonal = round(.7 * richness + .3 * coverage)
-    parts = {"seasonal_species_evidence": round(.55 * seasonal, 1),
-             "light_quality": round(.30 * light["score"], 1),
-             "weather_suitability": round(.15 * weather["score"], 1)}
+    prefs = normalize_preferences(preferences)
+    parts = {"seasonal_species_evidence": round(prefs["bird_evidence"] / 100 * seasonal, 1),
+             "light_quality": round(prefs["bird_light"] / 100 * light["score"], 1),
+             "weather_suitability": round(prefs["bird_weather"] / 100 * weather["score"], 1)}
     return {"score": round(sum(parts.values())), "seasonal_score": seasonal,
             "richness_score": richness, "historical_coverage_score": coverage,
             "contributions": parts,
-            "formula": "55% regional seasonal bird evidence + 30% light quality + 15% weather suitability"}
+            "preferences": prefs, "formula": f"{prefs['bird_evidence']}% regional seasonal evidence + {prefs['bird_light']}% light + {prefs['bird_weather']}% weather"}
 
 
-def astro_score(elevation: float, day: dict, conditions: dict) -> dict:
+def astro_score(elevation: float, day: dict, conditions: dict, preferences: dict | None = None) -> dict:
     cloud = conditions.get("cloud_cover")
     if cloud is None:
         cloud = day.get("cloud_cover_mean")
@@ -437,14 +460,15 @@ def astro_score(elevation: float, day: dict, conditions: dict) -> dict:
     darkness = max(0, min(100, round((-elevation - 6) / 12 * 100)))
     illumination = moon_illumination(day.get("moon_phase"))
     moon_dark = 50 if illumination is None else 100 - illumination
-    contributions = {"darkness": round(.55 * darkness, 1),
-                     "clear_sky": round(.35 * (100-cloud), 1),
-                     "low_moon_illumination": round(.10 * moon_dark, 1)}
+    prefs = normalize_preferences(preferences)
+    contributions = {"darkness": round(prefs["astro_darkness"] / 100 * darkness, 1),
+                     "clear_sky": round(prefs["astro_sky"] / 100 * (100-cloud), 1),
+                     "low_moon_illumination": round(prefs["astro_moon"] / 100 * moon_dark, 1)}
     return {"score": round(sum(contributions.values())), "solar_elevation_degrees": round(elevation, 1),
             "darkness_score": darkness, "cloud_cover_percent": cloud,
             "moon_illumination_percent": illumination,
-            "contributions": contributions,
-            "formula": "55% darkness below civil twilight + 35% clear sky + 10% low moon illumination"}
+            "contributions": contributions, "preferences": prefs,
+            "formula": f"{prefs['astro_darkness']}% darkness + {prefs['astro_sky']}% clear sky + {prefs['astro_moon']}% low moonlight"}
 
 
 def build_opportunities(weather: dict, birds: dict | None, location: dict) -> list[dict]:
@@ -474,10 +498,11 @@ def build_opportunities(weather: dict, birds: dict | None, location: dict) -> li
             conditions = nearest_hour(weather["hourly"], moment)
             light = light_breakdown(day, data_window, conditions)
             suitable = weather_breakdown(day, conditions)
-            photo = photo_breakdown(day, light, conditions, night)
-            bird = birding_score(birds, light, suitable) if not night else {
+            preferences = location.get("preferences")
+            photo = photo_breakdown(day, light, conditions, night, preferences)
+            bird = birding_score(birds, light, suitable, preferences) if not night else {
                 "score": None, "reason": "Birding score is inactive after blue hour."}
-            astro = astro_score(elevation, day, conditions) if name == "night" and night else None
+            astro = astro_score(elevation, day, conditions, preferences) if name == "night" and night else None
             opportunities.append({
                 "date": day["date"], "window": name, "time": local_time,
                 "solar_elevation_degrees": round(elevation, 1), "condition": day["condition"],
@@ -551,6 +576,13 @@ def tide_context(value: str | None, tides: dict, timezone_name: str) -> dict | N
             "height_m": event.get("height_m"), "minutes_from_sun_time": round((moment-target.astimezone(timezone.utc)).total_seconds()/60)}
 
 
+def solar_noon_time(sunrise: str | None, sunset: str | None) -> str | None:
+    if not sunrise or not sunset:
+        return None
+    rise, setting = datetime.fromisoformat(sunrise), datetime.fromisoformat(sunset)
+    return (rise + (setting-rise)/2).isoformat()
+
+
 class LocationStore:
     def __init__(self, path: Path):
         self.path = path
@@ -573,7 +605,10 @@ class LocationStore:
 
     def all(self) -> list[dict]:
         with self.lock:
-            return self._read()
+            locations = self._read()
+            for item in locations:
+                item["preferences"] = normalize_preferences(item.get("preferences"))
+            return locations
 
     def get(self, location_id: str) -> dict | None:
         return next((x for x in self.all() if x["id"] == location_id), None)
@@ -604,11 +639,14 @@ class LocationStore:
             raise ValueError("Bird search radius must be 10, 25, or 50 km.")
         with self.lock:
             locations = self._read()
+            previous = next((item for item in locations if item["id"] == location_id), None)
+            preferences = normalize_preferences(payload.get("preferences", (previous or {}).get("preferences")))
             location = {
                 "id": location_id or uuid.uuid4().hex[:12], "name": name,
                 "place_name": place_name, "latitude": lat, "longitude": lon,
                 "lookahead_days": days, "radius_km": radius,
                 "shoreline": bool(payload.get("shoreline", False)),
+                "preferences": preferences,
             }
             existing = next((i for i, item in enumerate(locations) if item["id"] == location["id"]), None)
             if existing is None:
@@ -689,6 +727,23 @@ class ReportService:
         astro_candidates = [x for x in opportunities if x["astro"]]
         best_astro = max(astro_candidates, key=lambda x: x["astro"]["score"], default=None)
         calendar = tide_calendar(tides, tides.get("timezone", timezone_name))
+        tides_by_date = {item["date"]: item["events"] for item in calendar}
+        opportunities_by_date: dict[str, list[dict]] = {}
+        for item in opportunities:
+            opportunities_by_date.setdefault(item["date"], []).append(item)
+        daily_summary = []
+        for day in weather["days"]:
+            items = opportunities_by_date.get(day["date"], [])
+            photo = max((x for x in items if x["photogenic"]["score"] > 0), key=lambda x: x["photogenic"]["score"], default=None)
+            bird = max((x for x in items if x["birding"]["score"] is not None), key=lambda x: x["birding"]["score"], default=None)
+            astro = max((x for x in items if x["astro"]), key=lambda x: x["astro"]["score"], default=None)
+            daily_summary.append({"date": day["date"], "condition": day["condition"],
+                "temperature_max_c": day["temperature_max_c"], "temperature_min_c": day["temperature_min_c"],
+                "precipitation_probability_max": day["precipitation_probability_max"], "wind_speed_kmh": day["wind_speed_kmh"],
+                "sunrise": day["sunrise"], "sunset": day["sunset"], "solar_noon": solar_noon_time(day["sunrise"], day["sunset"]),
+                "moonrise": day["moonrise"], "moonset": day["moonset"], "moon_phase": day["moon_phase"],
+                "photo": photo, "birding": bird, "astro": astro, "tides": tides_by_date.get(day["date"], []),
+                "bird_evidence": {"species_count": birds.get("species_count", 0), "recurring_species_count": birds.get("recurring_species_count", 0), "status": birds.get("status")}})
         today = datetime.now(ZoneInfo(timezone_name)).date().isoformat()
         day_today = next((x for x in weather["days"] if x["date"] == today), weather["days"][0])
         sunrise_tide = tide_context(day_today.get("sunrise"), tides, timezone_name)
@@ -701,6 +756,7 @@ class ReportService:
             "bird_outlook": birds, "tides": tides, "tide_calendar": calendar,
             "tide_context_today": {"sunrise": sunrise_tide, "sunset": sunset_tide},
             "opportunities": opportunities,
+            "daily_summary": daily_summary,
             "best_photo": best_photo, "best_birding": best_bird, "best_astro": best_astro,
             "scores": {"photogenic": best_photo["photogenic"] if best_photo else None,
                        "birding": best_bird["birding"] if best_bird else None,

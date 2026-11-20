@@ -16,6 +16,17 @@ import server
 
 
 class SolarAndScoreTests(TestCase):
+    def test_preference_weights_normalize_and_change_photo_score(self):
+        prefs = server.normalize_preferences({"photo_light": 100, "photo_sky": 0, "photo_weather": 0})
+        self.assertEqual(sum(prefs[key] for key in ("photo_light", "photo_sky", "photo_weather")), 100)
+        day = {"cloud_cover_mean": 20, "precipitation_probability_max": 10, "wind_speed_kmh": 0}
+        light = {"score": 80}
+        clear = server.photo_breakdown(day, light, {"cloud_cover": 20, "precipitation_probability": 10}, False, prefs)
+        self.assertEqual(clear["score"], 80)
+        dramatic = server.photo_breakdown(day, light, {"cloud_cover": 20, "precipitation_probability": 10}, False,
+            {"photo_light": 0, "photo_sky": 100, "photo_weather": 0, "sky_style": "dramatic"})
+        self.assertNotEqual(clear["score"], dramatic["score"])
+
     def test_solar_elevation_changes_by_time_and_location(self):
         instant = datetime(2026, 6, 21, 12, tzinfo=timezone.utc)
         london_noon = server.solar_elevation(instant, 51.5, -0.12)
@@ -107,6 +118,8 @@ class LocationStoreTests(TestCase):
             first = store.save({"name": "Coast", "latitude": 53.27, "longitude": -3.22,
                                 "lookahead_days": 14, "radius_km": 25, "shoreline": True})
             self.assertEqual(store.get(first["id"])["name"], "Coast")
+            self.assertEqual(sum(store.get(first["id"])["preferences"][key] for key in
+                ("photo_light", "photo_sky", "photo_weather")), 100)
             updated = store.save({"name": "Cliff", "latitude": 53.30, "longitude": -3.20,
                                  "lookahead_days": 7, "radius_km": 10, "shoreline": False}, first["id"])
             self.assertEqual(updated["name"], "Cliff")

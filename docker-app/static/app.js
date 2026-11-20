@@ -32,6 +32,7 @@ function moonName(phase) {
 }
 function setVisible(id, visible) { $(id).classList.toggle("hidden", !visible); }
 function currentLocation() { return state.locations.find(x => x.id === state.activeId); }
+const preferenceFields = ["photo_light","photo_sky","photo_weather","bird_evidence","bird_light","bird_weather","astro_darkness","astro_sky","astro_moon"];
 
 async function loadLocations(preferredId) {
   state.locations = await api("/api/locations");
@@ -134,13 +135,13 @@ function renderReport(report) {
   $("dataUpdated").textContent = `Weather source: ${report.providers.weather.source} · Refreshed ${new Date(report.updated_at).toLocaleString()}`;
 }
 function scoreTone(score) { return score >= 75 ? "var(--green)" : score >= 50 ? "var(--amber)" : "#dca08d"; }
+function opportunityText(item, key, timezone) {
+  if (!item) return "—";
+  return `${item.window} ${fmtTime(item.time,timezone)} (${item[key]?.score ?? "—"}/100)`;
+}
 function renderForecast(report) {
-  const oppByDate = {};
-  for (const o of report.opportunities || []) (oppByDate[o.date] ||= []).push(o);
-  $("forecastTable").innerHTML = (report.weather_days || []).map((day, index) => {
-    const opportunities = oppByDate[day.date] || [];
-    const photoBest = opportunities.filter(x=>x.photogenic?.score > 0).sort((a,b)=>b.photogenic.score-a.photogenic.score)[0];
-    const nightBest = opportunities.filter(x=>x.astro).sort((a,b)=>b.astro.score-a.astro.score)[0];
+  $("forecastTable").innerHTML = (report.daily_summary || []).map((day, index) => {
+    const opportunities = (report.opportunities || []).filter(x => x.date === day.date);
     const opportunitiesHtml = opportunities.map(o => {
       const scoreValue = o.astro?.score ?? o.photogenic.score;
       const scoreLabel = o.astro ? `Astro ${scoreValue}/100` : o.photogenic.score === 0 && o.photogenic.night_gate ? "Photo 0 · astro only" : `Photo ${scoreValue}/100`;
@@ -153,9 +154,11 @@ function renderForecast(report) {
       return `<article class="window-card"><div class="window-top"><b>${safe(o.window.toUpperCase())} · ${fmtTime(o.time,report.timezone)}</b><span class="window-score" style="color:${scoreTone(scoreValue)}">${safe(scoreLabel)}</span></div><p>${safe(explain)}</p><div class="window-inputs"><span>light ${safe(lightScore ?? "—")}</span><span>${safe(cloud)}</span><span>${safe(rain)}</span><span>${safe(wind)}</span>${o.astro?`<span>${safe(moon)}</span>`:""}${o.birding?.score!=null?`<span>birds ${safe(o.birding.score)}</span>`:""}</div></article>`;
     }).join("");
     const highLow = day.temperature_max_c == null ? "—" : `${Math.round(day.temperature_max_c)}° / ${Math.round(day.temperature_min_c)}°`;
-    const temp = ` · ${highLow}`;
-    const best = photoBest ? `Photo ${photoBest.photogenic.score}` : nightBest ? `Astro ${nightBest.astro.score}` : "No score";
-    return `<details class="forecast-day" ${index===0?"open":""}><summary><span class="day-name">${fmtDate(day.date,report.timezone)}</span><span class="day-condition">${safe(day.condition)}${safe(temp)}</span><span class="day-summary"><span>Rain <b>${day.precipitation_probability_max ?? "—"}%</b></span><span>Wind <b>${day.wind_speed_kmh ?? "—"}</b></span></span><span class="day-best">${safe(best)}</span><span class="chevron">⌄</span></summary><div class="window-grid">${opportunitiesHtml || `<div class="no-data">No photo or night windows returned for this date.</div>`}</div></details>`;
+    const top = [day.photo && `Photo ${day.photo.photogenic.score}`, day.birding && `Birding ${day.birding.birding.score}`, day.astro && `Astro ${day.astro.astro.score}`].filter(Boolean).join(" · ") || "No score";
+    const tides = day.tides?.length ? day.tides.map(t=>`${safe(t.type)} ${fmtTime(t.time,report.timezone)}${t.height_m==null?"":` · ${Number(t.height_m).toFixed(1)} m`}`).join(" · ") : (currentLocation()?.shoreline ? "No tide events" : "Tides disabled");
+    const birdEvidence = day.bird_evidence?.status === "seasonal_records" ? `${day.bird_evidence.species_count} regional species · historical evidence` : "Seasonal bird evidence unavailable";
+    const keyTimes = `Sunrise ${fmtTime(day.sunrise,report.timezone)} · Noon ${fmtTime(day.solar_noon,report.timezone)} · Sunset ${fmtTime(day.sunset,report.timezone)} · Moon ${fmtTime(day.moonrise,report.timezone)} / ${fmtTime(day.moonset,report.timezone)}`;
+    return `<details class="forecast-day" ${index===0?"open":""}><summary><span class="day-name">${fmtDate(day.date,report.timezone)}</span><span class="day-condition">${safe(day.condition)} · ${safe(highLow)}</span><span class="day-summary"><span>Rain <b>${day.precipitation_probability_max ?? "—"}%</b></span><span>Wind <b>${day.wind_speed_kmh ?? "—"}</b></span></span><span class="day-best">${safe(top)}</span><span class="chevron">⌄</span></summary><div class="daily-lineup"><div><b>Best photo</b><span>${safe(opportunityText(day.photo,"photogenic",report.timezone))}</span></div><div><b>Birding</b><span>${safe(opportunityText(day.birding,"birding",report.timezone))} · ${safe(birdEvidence)}</span></div><div><b>Astro</b><span>${safe(opportunityText(day.astro,"astro",report.timezone))}</span></div><div><b>Key times</b><span>${safe(keyTimes)}</span></div><div><b>Tides · local day</b><span>${tides}</span></div></div><div class="window-grid">${opportunitiesHtml || `<div class="no-data">No photo or night windows returned for this date.</div>`}</div></details>`;
   }).join("");
 }
 function renderBirds(report) {
@@ -195,6 +198,8 @@ function openForm(editing) {
   form.elements.lookahead_days.value = String(loc?.lookahead_days || 7);
   form.elements.radius_km.value = String(loc?.radius_km || 25);
   form.elements.shoreline.checked = Boolean(loc?.shoreline);
+  const prefs = loc?.preferences || {photo_light:45,photo_sky:30,photo_weather:25,bird_evidence:50,bird_light:25,bird_weather:25,astro_darkness:55,astro_sky:35,astro_moon:10,sky_style:"clear"};
+  preferenceFields.forEach(key => form.elements[key].value = prefs[key]); form.elements.sky_style.value = prefs.sky_style || "clear";
   $("locationFormWrap").classList.remove("hidden");
   $("locationFormWrap").scrollIntoView({behavior:"smooth",block:"center"});
 }
@@ -223,7 +228,7 @@ $("searchPlaceButton").addEventListener("click", searchPlaces);
 $("placeQuery").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchPlaces();}});
 $("locationForm").addEventListener("submit", async event=>{
   event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
-  const payload = {name:data.get("name"),latitude:data.get("latitude"),longitude:data.get("longitude"),place_name:data.get("place_name"),lookahead_days:Number(data.get("lookahead_days")),radius_km:Number(data.get("radius_km")),shoreline:form.elements.shoreline.checked};
+  const payload = {name:data.get("name"),latitude:data.get("latitude"),longitude:data.get("longitude"),place_name:data.get("place_name"),lookahead_days:Number(data.get("lookahead_days")),radius_km:Number(data.get("radius_km")),shoreline:form.elements.shoreline.checked,preferences:{...Object.fromEntries(preferenceFields.map(key=>[key,Number(data.get(key))])),sky_style:data.get("sky_style")}};
   try {
     const loc = state.editing && state.activeId
       ? await api(`/api/locations/${encodeURIComponent(state.activeId)}`,{method:"PUT",body:JSON.stringify(payload)})

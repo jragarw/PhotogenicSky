@@ -298,6 +298,10 @@ select:focus,input:focus {
   cursor:pointer
 }
 
+.preference-settings { margin-top:18px; border-top:1px solid var(--line); padding-top:14px }
+.preference-settings summary span { margin-left:8px; color:var(--muted) }
+.preference-grid { margin-top:14px; grid-template-columns:repeat(5,minmax(0,1fr)) }
+
 .coordinate-grid {
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -694,6 +698,11 @@ select:focus,input:focus {
   background:#ffffff05
 }
 
+.daily-lineup { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:15px; border-bottom:1px solid var(--line) }
+.daily-lineup>div { display:flex; flex-direction:column; gap:5px; color:var(--muted); font-size:12px }
+.daily-lineup b { color:var(--sage); font:10px var(--mono); text-transform:uppercase; letter-spacing:.08em }
+.daily-lineup span { line-height:1.5 }
+
 .day-name {
   font:600 13px var(--display)
 }
@@ -996,6 +1005,7 @@ select:focus,input:focus {
   .form-grid {
     grid-template-columns:repeat(2,1fr)
   }
+  .preference-grid { grid-template-columns:repeat(3,minmax(0,1fr)) }
 }
 
 @media(max-width:600px) {
@@ -1079,6 +1089,8 @@ select:focus,input:focus {
   .form-grid {
     grid-template-columns:1fr
   }
+  .preference-grid { grid-template-columns:repeat(2,minmax(0,1fr)) }
+  .daily-lineup { grid-template-columns:1fr }
   .check-label {
     padding:7px 0
   }

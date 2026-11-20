@@ -29,6 +29,8 @@ The app refreshes provider data when a report is opened and caches each location
 - **Astrophotography score:** forecast night windows only after the Sun falls below −6° solar elevation (the end of blue hour). The daylight score is zero in those windows; the astro score shows darkness, cloud, and moon-illumination contributions.
 - **Light and weather:** current solar phase/elevation, total and low/mid/high cloud cover, sunrise, solar noon, sunset, UV, seven-day weather, and the detailed conditions at each planning window.
 - **Tide calendar:** 30 days of local high/low events when shoreline is enabled, plus tide context near today’s sunrise and sunset.
+- **Daily lineup:** each forecast day groups its best photo, birding, and astro windows with key sun/moon times, matching local tide events, and regional seasonal bird evidence.
+- **Location scoring preferences:** set the relative weights for light, sky, and weather by activity. Photography can prefer clear skies or dramatic broken cloud; birding can emphasize historical seasonal evidence; astro can emphasize darkness, clear sky, or low moonlight. Each activity's weights are normalized to 100%.
 
 Scores are comparative planning guides, not guarantees. Tide predictions are harmonic estimates and are not for navigation; check the station and datum before relying on tide heights.
 
@@ -75,6 +77,7 @@ Providers refresh independently. If one fails, its status and error are shown in
 - `DELETE /api/locations/{id}`
 - `GET /api/report/{id}` · complete report and score explanations (`?refresh=1` bypasses cache)
 - `GET /api/glance/{id}` · compact dashboard payload
+- `PUT /api/locations/{id}` accepts a `preferences` object for photo, birding, and astro weights plus `sky_style` (`clear` or `dramatic`). Existing locations receive default preferences.
 - `GET /api/geocode?q=<place>` · place search
 
 This is the standalone application path in the Photogenic Sky repository. The existing Home Assistant integration remains separate and is not required to run this app.
