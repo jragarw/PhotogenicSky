@@ -301,6 +301,10 @@ select:focus,input:focus {
 .preference-settings { margin-top:18px; border-top:1px solid var(--line); padding-top:14px }
 .preference-settings summary span { margin-left:8px; color:var(--muted) }
 .preference-grid { margin-top:14px; grid-template-columns:repeat(5,minmax(0,1fr)) }
+.weight-control { display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px 10px; font-size:11px!important }
+.weight-control output { color:var(--sage); font:11px var(--mono) }
+.weight-control input[type="range"] { grid-column:1/-1; margin:2px 0 0; padding:0; height:6px; accent-color:#bad8bd; cursor:pointer; background:#303638; border:0 }
+.preference-grid>label:not(.weight-control)>select { margin-top:7px }
 
 .coordinate-grid {
   display:grid;

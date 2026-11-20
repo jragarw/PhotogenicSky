@@ -51,7 +51,7 @@ WEATHER_CODES = {
 DEFAULT_PREFERENCES = {"photo_light": 45, "photo_sky": 30, "photo_weather": 25,
                        "bird_evidence": 50, "bird_light": 25, "bird_weather": 25,
                        "astro_darkness": 55, "astro_sky": 35, "astro_moon": 10,
-                       "sky_style": "clear"}
+                       "sky_style": "dramatic"}
 
 
 def normalize_preferences(value: dict | None) -> dict:
@@ -66,7 +66,7 @@ def normalize_preferences(value: dict | None) -> dict:
         # Keep each group summing to 100 after rounding.
         prefs[fields[0]] += 100 - sum(prefs[field] for field in fields)
     if prefs.get("sky_style") not in {"clear", "dramatic"}:
-        prefs["sky_style"] = "clear"
+        prefs["sky_style"] = "dramatic"
     return prefs
 
 
@@ -334,6 +334,37 @@ def moon_illumination(phase: float | None) -> float | None:
     return round((1 - abs(2 * phase - 1)) * 100)
 
 
+def moon_is_above_horizon(day: dict, moment: datetime | None, timezone_name: str) -> bool | None:
+    """Estimate whether the Moon is up at an opportunity using local rise/set times."""
+    if moment is None:
+        return None
+    try:
+        zone = ZoneInfo(timezone_name)
+        when = moment if moment.tzinfo else moment.replace(tzinfo=zone)
+        local_when = when.astimezone(zone)
+        day_date = date.fromisoformat(day["date"])
+        rise = datetime.fromisoformat(day["moonrise"]) if day.get("moonrise") else None
+        setting = datetime.fromisoformat(day["moonset"]) if day.get("moonset") else None
+        if rise and rise.tzinfo is None:
+            rise = rise.replace(tzinfo=zone)
+        if setting and setting.tzinfo is None:
+            setting = setting.replace(tzinfo=zone)
+        # If both events are reported, compare to their actual instants.
+        if rise and setting:
+            rise_local, set_local = rise.astimezone(zone), setting.astimezone(zone)
+            if rise_local <= set_local:
+                return rise_local <= local_when <= set_local
+            return local_when >= rise_local or local_when <= set_local
+        # A missing event can mean the Moon remains up/down for this whole local date.
+        if rise and rise.astimezone(zone).date() == day_date:
+            return local_when >= rise.astimezone(zone)
+        if setting and setting.astimezone(zone).date() == day_date:
+            return local_when <= setting.astimezone(zone)
+    except (ValueError, KeyError, TypeError):
+        return None
+    return None
+
+
 def nearest_hour(hourly: dict, target: str | datetime) -> dict:
     target_dt = datetime.fromisoformat(target) if isinstance(target, str) else target
     times = hourly.get("time") or []
@@ -452,21 +483,25 @@ def birding_score(birds: dict | None, light: dict, weather: dict, preferences: d
             "preferences": prefs, "formula": f"{prefs['bird_evidence']}% regional seasonal evidence + {prefs['bird_light']}% light + {prefs['bird_weather']}% weather"}
 
 
-def astro_score(elevation: float, day: dict, conditions: dict, preferences: dict | None = None) -> dict:
+def astro_score(elevation: float, day: dict, conditions: dict, preferences: dict | None = None,
+                moment: datetime | None = None, timezone_name: str = "UTC") -> dict:
     cloud = conditions.get("cloud_cover")
     if cloud is None:
         cloud = day.get("cloud_cover_mean")
     cloud = 50 if cloud is None else cloud
     darkness = max(0, min(100, round((-elevation - 6) / 12 * 100)))
     illumination = moon_illumination(day.get("moon_phase"))
-    moon_dark = 50 if illumination is None else 100 - illumination
+    moon_visible = moon_is_above_horizon(day, moment, timezone_name)
+    moon_penalty = (illumination if illumination is not None else 50) if moon_visible is not False else 0
+    moon_dark = 100 - moon_penalty
     prefs = normalize_preferences(preferences)
     contributions = {"darkness": round(prefs["astro_darkness"] / 100 * darkness, 1),
                      "clear_sky": round(prefs["astro_sky"] / 100 * (100-cloud), 1),
                      "low_moon_illumination": round(prefs["astro_moon"] / 100 * moon_dark, 1)}
     return {"score": round(sum(contributions.values())), "solar_elevation_degrees": round(elevation, 1),
             "darkness_score": darkness, "cloud_cover_percent": cloud,
-            "moon_illumination_percent": illumination,
+            "moon_illumination_percent": illumination, "moon_above_horizon": moon_visible,
+            "moon_penalty_percent": moon_penalty,
             "contributions": contributions, "preferences": prefs,
             "formula": f"{prefs['astro_darkness']}% darkness + {prefs['astro_sky']}% clear sky + {prefs['astro_moon']}% low moonlight"}
 
@@ -502,7 +537,7 @@ def build_opportunities(weather: dict, birds: dict | None, location: dict) -> li
             photo = photo_breakdown(day, light, conditions, night, preferences)
             bird = birding_score(birds, light, suitable, preferences) if not night else {
                 "score": None, "reason": "Birding score is inactive after blue hour."}
-            astro = astro_score(elevation, day, conditions, preferences) if name == "night" and night else None
+            astro = astro_score(elevation, day, conditions, preferences, moment, weather["timezone"]) if name == "night" and night else None
             opportunities.append({
                 "date": day["date"], "window": name, "time": local_time,
                 "solar_elevation_degrees": round(elevation, 1), "condition": day["condition"],

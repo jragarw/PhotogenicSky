@@ -41,6 +41,23 @@ class SolarAndScoreTests(TestCase):
         self.assertEqual(server.moon_illumination(0.5), 100)
         self.assertEqual(server.moon_illumination(None), None)
 
+    def test_astro_moon_penalty_depends_on_horizon(self):
+        day = {"date": "2026-11-21", "moon_phase": 0.5,
+               "moonrise": "2026-11-21T20:00", "moonset": "2026-11-22T04:00",
+               "cloud_cover_mean": 0}
+        prefs = {"astro_darkness": 0, "astro_sky": 0, "astro_moon": 100}
+        below = server.astro_score(-18, day, {"cloud_cover": 0}, prefs,
+            datetime(2026, 11, 21, 19, tzinfo=ZoneInfo("UTC")), "UTC")
+        above = server.astro_score(-18, day, {"cloud_cover": 0}, prefs,
+            datetime(2026, 11, 21, 22, tzinfo=ZoneInfo("UTC")), "UTC")
+        self.assertFalse(below["moon_above_horizon"])
+        self.assertEqual(below["contributions"]["low_moon_illumination"], 100)
+        self.assertTrue(above["moon_above_horizon"])
+        self.assertEqual(above["contributions"]["low_moon_illumination"], 0)
+
+    def test_dramatic_cloud_is_default_photo_preference(self):
+        self.assertEqual(server.normalize_preferences(None)["sky_style"], "dramatic")
+
     def test_explanations_include_score_inputs_and_night_gate(self):
         day = {"cloud_cover_mean": 35, "precipitation_probability_max": 15,
                "wind_speed_kmh": 8}

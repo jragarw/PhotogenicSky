@@ -198,8 +198,8 @@ function openForm(editing) {
   form.elements.lookahead_days.value = String(loc?.lookahead_days || 7);
   form.elements.radius_km.value = String(loc?.radius_km || 25);
   form.elements.shoreline.checked = Boolean(loc?.shoreline);
-  const prefs = loc?.preferences || {photo_light:45,photo_sky:30,photo_weather:25,bird_evidence:50,bird_light:25,bird_weather:25,astro_darkness:55,astro_sky:35,astro_moon:10,sky_style:"clear"};
-  preferenceFields.forEach(key => form.elements[key].value = prefs[key]); form.elements.sky_style.value = prefs.sky_style || "clear";
+  const prefs = loc?.preferences || {photo_light:45,photo_sky:30,photo_weather:25,bird_evidence:50,bird_light:25,bird_weather:25,astro_darkness:55,astro_sky:35,astro_moon:10,sky_style:"dramatic"};
+  preferenceFields.forEach(key => { form.elements[key].value = prefs[key]; form.querySelector(`[data-weight="${key}"]`).value = `${prefs[key]}%`; }); form.elements.sky_style.value = prefs.sky_style || "dramatic";
   $("locationFormWrap").classList.remove("hidden");
   $("locationFormWrap").scrollIntoView({behavior:"smooth",block:"center"});
 }
@@ -224,6 +224,9 @@ $("placeResults").addEventListener("change", event=>{
   if (!$("locationForm").elements.name.value) $("locationForm").elements.name.value = place.name;
   $("formError").textContent = `Coordinates selected · ${Number(place.latitude).toFixed(3)}, ${Number(place.longitude).toFixed(3)}`;
 });
+preferenceFields.forEach(key => $("locationForm").elements[key].addEventListener("input", event => {
+  $("locationForm").querySelector(`[data-weight="${key}"]`).value = `${event.target.value}%`;
+}));
 $("searchPlaceButton").addEventListener("click", searchPlaces);
 $("placeQuery").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();searchPlaces();}});
 $("locationForm").addEventListener("submit", async event=>{

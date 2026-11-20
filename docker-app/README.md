@@ -26,11 +26,11 @@ The app refreshes provider data when a report is opened and caches each location
 
 - **Photogenic score:** the best upcoming daylight window in the seven-day forecast. Its explanation shows the light, clear-sky, and dry-weather contributions and their forecast inputs.
 - **Birding score:** regional historical bird evidence, shared light quality, and weather suitability. The browser lists the leading species and evidence totals. GBIF records are historical observations for matching calendar dates in the preceding five years, not a live count or forecast.
-- **Astrophotography score:** forecast night windows only after the Sun falls below −6° solar elevation (the end of blue hour). The daylight score is zero in those windows; the astro score shows darkness, cloud, and moon-illumination contributions.
+- **Astrophotography score:** forecast night windows only after the Sun falls below −6° solar elevation (the end of blue hour). The daylight score is zero in those windows; the astro score accounts for darkness, cloud, and moonlight. A bright Moon above the horizon reduces the score; a Moon below the horizon adds no moonlight penalty.
 - **Light and weather:** current solar phase/elevation, total and low/mid/high cloud cover, sunrise, solar noon, sunset, UV, seven-day weather, and the detailed conditions at each planning window.
 - **Tide calendar:** 30 days of local high/low events when shoreline is enabled, plus tide context near today’s sunrise and sunset.
 - **Daily lineup:** each forecast day groups its best photo, birding, and astro windows with key sun/moon times, matching local tide events, and regional seasonal bird evidence.
-- **Location scoring preferences:** set the relative weights for light, sky, and weather by activity. Photography can prefer clear skies or dramatic broken cloud; birding can emphasize historical seasonal evidence; astro can emphasize darkness, clear sky, or low moonlight. Each activity's weights are normalized to 100%.
+- **Location scoring preferences:** set the relative weights for light, sky, and weather by activity using sliders. Photography defaults to dramatic broken cloud and can be switched to clear skies; birding can emphasize historical seasonal evidence; astro can emphasize darkness, clear sky, or moonlight. Each activity's weights are normalized to 100%.
 
 Scores are comparative planning guides, not guarantees. Tide predictions are harmonic estimates and are not for navigation; check the station and datum before relying on tide heights.
 
