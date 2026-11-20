@@ -165,7 +165,7 @@ function renderBirds(report) {
   const birds = report.bird_outlook || {}; const available = birds.status === "seasonal_records" || birds.status === "no_records";
   $("birdWindowNote").textContent = `${birds.window_days || currentLocation()?.lookahead_days || 7} days · ${birds.radius_km || currentLocation()?.radius_km || 25} km radius`;
   $("birdEvidenceSummary").innerHTML = available ? `<div class="evidence-stat"><b>${birds.species_count ?? 0}</b><span>regional species</span></div><div class="evidence-stat"><b>${birds.recurring_species_count ?? 0}</b><span>seen in 3+ years</span></div><div class="evidence-stat"><b>${birds.total_historical_records ?? 0}</b><span>historical records</span></div>` : `<div class="no-data">Bird evidence unavailable: ${safe(birds.error || "provider did not return data")}. Scores still expose their light and weather inputs; birding score remains unavailable without regional evidence.</div>`;
-  $("birdSpecies").innerHTML = (birds.species || []).map((s,i)=>`<div class="species-row"><span class="species-icon">${i+1<10?`0${i+1}`:i+1}</span><div><div class="species-name">${safe(s.common_name || s.scientific_name || `GBIF taxon ${s.taxon_key}`)}</div><div class="species-sci">${safe(s.scientific_name || "")}</div></div><span class="species-evidence">${safe(s.years_reported)} years · ${safe(s.records)} records</span></div>`).join("") || (available ? `<div class="no-data">No matching seasonal records were returned for this location and period.</div>` : "");
+  $("birdSpecies").innerHTML = (birds.species || []).map((s,i)=>`<div class="species-row"><span class="species-icon">${i+1<10?`0${i+1}`:i+1}</span><div><div class="species-name"><a href="https://www.gbif.org/species/${encodeURIComponent(s.taxon_key)}" target="_blank" rel="noopener noreferrer">${safe(s.common_name || s.scientific_name || `GBIF taxon ${s.taxon_key}`)}</a></div><div class="species-sci">${safe(s.scientific_name || "")}</div></div><span class="species-evidence">${safe(s.years_reported)} years · ${safe(s.records)} records</span></div>`).join("") || (available ? `<div class="no-data">No matching seasonal records were returned for this location and period.</div>` : "");
   $("birdNote").textContent = birds.note || "GBIF observations are historical evidence for these calendar dates, not a prediction that a species will be present.";
 }
 function renderTides(report) {
@@ -183,7 +183,18 @@ function renderTides(report) {
   $("tideCalendar").innerHTML = (report.tide_calendar || []).map(day=>`<div class="tide-day"><div class="tide-date">${fmtDate(day.date,report.timezone)}</div><div class="tide-events">${day.events.map(event=>`<span class="tide-event ${safe(event.type)}">${safe(event.type)} ${fmtTime(event.time,report.timezone)}${event.height_m==null?"":` · ${Number(event.height_m).toFixed(1)} m`}</span>`).join("")}</div></div>`).join("") || `<div class="no-data">No tide events in the requested window.</div>`;
   $("tideAttribution").textContent = `${tides.attribution || tides.source}${tides.note ? ` · ${tides.note}` : ""}`;
 }
-function openForm(editing) {
+async function openForm(editing) {
+  if (editing && state.activeId) {
+    try {
+      const saved = await api("/api/locations");
+      state.locations = saved;
+      $("locationSelect").innerHTML = state.locations.map(x => `<option value="${safe(x.id)}">${safe(x.name)}${x.place_name ? ` · ${safe(x.place_name)}` : ""}</option>`).join("");
+      $("locationSelect").value = state.activeId;
+    } catch (err) {
+      $("formError").textContent = `Could not load saved location settings: ${err.message}`;
+      return;
+    }
+  }
   state.editing = editing;
   const form = $("locationForm"); form.reset(); state.selectedPlace = null;
   $("placeResults").innerHTML = `<option value="">Choose a search result</option>`;

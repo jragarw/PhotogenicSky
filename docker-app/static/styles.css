@@ -850,6 +850,8 @@ select:focus,input:focus {
   font-weight:500;
   font-size:12px
 }
+.species-name a { color:inherit; text-decoration:underline; text-decoration-color:#718273; text-underline-offset:3px }
+.species-name a:hover { color:var(--sage); text-decoration-color:var(--sage) }
 
 .species-sci {
   color:#84908a;

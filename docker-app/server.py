@@ -675,7 +675,11 @@ class LocationStore:
         with self.lock:
             locations = self._read()
             previous = next((item for item in locations if item["id"] == location_id), None)
-            preferences = normalize_preferences(payload.get("preferences", (previous or {}).get("preferences")))
+            saved_preferences = (previous or {}).get("preferences")
+            preferences = normalize_preferences(payload.get("preferences", saved_preferences))
+            # Keep preferences when an older client submits an update without them.
+            if "preferences" not in payload and saved_preferences:
+                preferences = normalize_preferences(saved_preferences)
             location = {
                 "id": location_id or uuid.uuid4().hex[:12], "name": name,
                 "place_name": place_name, "latitude": lat, "longitude": lon,

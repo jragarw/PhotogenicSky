@@ -138,8 +138,13 @@ class LocationStoreTests(TestCase):
             self.assertEqual(sum(store.get(first["id"])["preferences"][key] for key in
                 ("photo_light", "photo_sky", "photo_weather")), 100)
             updated = store.save({"name": "Cliff", "latitude": 53.30, "longitude": -3.20,
-                                 "lookahead_days": 7, "radius_km": 10, "shoreline": False}, first["id"])
+                                 "lookahead_days": 7, "radius_km": 10, "shoreline": False,
+                                 "preferences": {"photo_light": 80, "photo_sky": 10, "photo_weather": 10}}, first["id"])
             self.assertEqual(updated["name"], "Cliff")
+            self.assertEqual(updated["preferences"]["photo_light"], 80)
+            legacy_update = store.save({"name": "Cliff", "latitude": 53.30, "longitude": -3.20,
+                                        "lookahead_days": 7, "radius_km": 10, "shoreline": False}, first["id"])
+            self.assertEqual(legacy_update["preferences"], updated["preferences"])
             self.assertTrue(store.delete(first["id"]))
             self.assertFalse(store.delete(first["id"]))
 
