@@ -37,7 +37,7 @@ const preferenceFields = ["photo_light","photo_sky","photo_weather","bird_eviden
 function planButton(item, locationId = state.activeId) {
   const location = state.locations.find(x => x.id === locationId);
   const saved = (location?.plan || []).some(pin => pin.key === item.key);
-  return `<button type="button" class="pin-button ${saved ? "is-pinned" : ""}" data-plan-action="${saved ? "remove" : "add"}" data-location-id="${safe(locationId)}" data-plan-key="${safe(item.key)}" data-plan-item="${safe(JSON.stringify(item))}" aria-label="${saved ? "Remove from" : "Pin to"} plan">${saved ? "Pinned ✓" : "＋ Pin to plan"}</button>`;
+  return `<details class="plan-options"><summary aria-label="Plan options">•••</summary><button type="button" class="pin-button ${saved ? "is-pinned" : ""}" data-plan-action="${saved ? "remove" : "add"}" data-location-id="${safe(locationId)}" data-plan-key="${safe(item.key)}" data-plan-item="${safe(JSON.stringify(item))}">${saved ? "Remove from plan" : "Pin to plan"}</button></details>`;
 }
 
 function renderPlan() {
