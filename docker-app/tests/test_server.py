@@ -16,6 +16,25 @@ import server
 
 
 class SolarAndScoreTests(TestCase):
+    def test_gbif_cache_reuses_matching_calendar_window_across_days(self):
+        base = "https://api.gbif.org/v1/occurrence/search?"
+        first = base + "eventDate=2025-11-20%2C2025-11-26&taxonKey=212"
+        next_day = base + "eventDate=2025-11-21%2C2025-11-27&taxonKey=212"
+        self.assertEqual(server.ProviderCache.key(first), server.ProviderCache.key(next_day))
+
+    def test_provider_response_cache_persists_and_serves_stale_values(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "providers.json"
+            first = server.ProviderCache(path)
+            url = "https://api.open-meteo.com/v1/forecast?latitude=0"
+            first.put(url, {"forecast": "saved"})
+            restarted = server.ProviderCache(path)
+            self.assertEqual(restarted.get(url, 60, 3600), {"forecast": "saved"})
+            with restarted.lock:
+                restarted.entries[restarted.key(url)]["saved_at"] -= 120
+            self.assertIsNone(restarted.get(url, 60, 3600))
+            self.assertEqual(restarted.get_stale(url, 3600), {"forecast": "saved"})
+
     def test_weather_forecast_fetches_fourteen_days_for_tide_alerts(self):
         from unittest.mock import patch
         dates = [(datetime.now(ZoneInfo("UTC")).date() + timedelta(days=offset)).isoformat() for offset in range(14)]

@@ -20,7 +20,7 @@ The image is built from `docker-app/` and published to GHCR whenever app files a
 
 For local source development, use `docker compose -f compose.dev.yaml up --build` instead; that file builds from the checkout and stores data in a named volume.
 
-The app refreshes provider data when a report is opened and caches each location for four hours. Use the refresh button to fetch new data immediately. Set `CACHE_SECONDS` in `compose.yaml` to change the cache period.
+The app caches each location report for four hours. Provider responses are also cached on the persistent `/data` volume: weather for 30 minutes, tide predictions for one hour, and GBIF seasonal searches for seven days. Species details and place searches are cached for 30 days. If a provider is rate limited or temporarily unavailable, the app can use a previously saved response for a limited period instead of blanking the report. The refresh button reloads the report while respecting these provider cache windows. Set `CACHE_SECONDS` in `compose.yaml` to change the report cache period.
 
 ## What the report shows
 

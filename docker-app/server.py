@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import asin, atan2, cos, degrees, log1p, pi, radians, sin
 from pathlib import Path
 from threading import Lock
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 import base64
@@ -18,6 +19,7 @@ import json
 import logging
 import os
 import re
+from time import time as epoch_time
 import uuid
 
 ROOT = Path(__file__).resolve().parent
@@ -82,18 +84,112 @@ def weighted_score(parts: dict[str, float], preferences: dict, fields: dict[str,
 
 
 def http_json(url: str, params: dict | None = None, timeout: int = 18):
-    """Fetch a public JSON API with an identifying user agent and bounded timeout."""
+    """Fetch and persistently cache public JSON responses to avoid repeat provider scraping."""
     if params:
         url += ("&" if "?" in url else "?") + urlencode(params)
+    ttl, stale_ttl = provider_cache_lifetime(url)
+    cached = provider_cache.get(url, ttl, stale_ttl)
+    if cached is not None:
+        return cached
     request = Request(url, headers={"User-Agent": "PhotogenicSky/3.0 (self-hosted photo planning app)"})
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            result = json.loads(response.read().decode("utf-8"))
+            provider_cache.put(url, result)
+            return result
     except HTTPError as err:
         detail = err.read().decode("utf-8", "replace")[:300]
+        stale = provider_cache.get_stale(url, stale_ttl)
+        if stale is not None:
+            LOG.warning("Provider HTTP %s; serving cached response for %s", err.code, url.split("?", 1)[0])
+            return stale
         raise ProviderError(f"Provider returned HTTP {err.code}: {detail}") from err
     except (URLError, TimeoutError, json.JSONDecodeError) as err:
+        stale = provider_cache.get_stale(url, stale_ttl)
+        if stale is not None:
+            LOG.warning("Provider request failed; serving cached response for %s: %s", url.split("?", 1)[0], err)
+            return stale
         raise ProviderError(str(err)) from err
+
+
+def provider_cache_lifetime(url: str) -> tuple[int, int]:
+    """Fresh and maximum stale lifetimes, in seconds, tailored to each source."""
+    if "api.gbif.org/v1/occurrence/" in url:
+        return 7 * 86400, 21 * 86400
+    if "api.gbif.org/v1/species/" in url:
+        return 30 * 86400, 365 * 86400
+    if "tidesandcurrents.noaa.gov/" in url or "openwaters.io/" in url:
+        return 3600, 24 * 3600
+    if "geocoding-api.open-meteo.com/" in url:
+        return 30 * 86400, 365 * 86400
+    if "api.open-meteo.com/" in url:
+        return 1800, 6 * 3600
+    return 0, 0
+
+
+class ProviderCache:
+    """Small atomic JSON cache stored on the app's persistent data volume."""
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = Lock()
+        self.entries: dict[str, dict] = {}
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                self.entries = loaded
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    @staticmethod
+    def key(url: str) -> str:
+        parts = urlsplit(url)
+        query = parse_qsl(parts.query, keep_blank_values=True)
+        # Bird evidence is seasonal; bucket the moving matching-date window by
+        # month so daily report refreshes do not issue five new GBIF searches.
+        if "api.gbif.org/v1/occurrence/" in url:
+            query = [(name, ",".join(value[5:7] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) else value
+                                     for value in value.split(",")) if name == "eventDate" else value)
+                     for name, value in query]
+        canonical = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(sorted(query)), ""))
+        return sha256(canonical.encode("utf-8")).hexdigest()
+
+    def get(self, url: str, ttl: int, stale_ttl: int):
+        if ttl <= 0:
+            return None
+        key = self.key(url)
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry and epoch_time() - entry.get("saved_at", 0) <= ttl:
+                return entry.get("payload")
+        return None
+
+    def get_stale(self, url: str, stale_ttl: int):
+        if stale_ttl <= 0:
+            return None
+        with self.lock:
+            entry = self.entries.get(self.key(url))
+            if entry and epoch_time() - entry.get("saved_at", 0) <= stale_ttl:
+                return entry.get("payload")
+        return None
+
+    def put(self, url: str, payload: dict) -> None:
+        if provider_cache_lifetime(url)[0] <= 0:
+            return
+        with self.lock:
+            self.entries[self.key(url)] = {"saved_at": epoch_time(), "payload": payload}
+            # Bound the cache and discard old entries first.
+            if len(self.entries) > 2000:
+                self.entries = dict(sorted(self.entries.items(), key=lambda pair: pair[1].get("saved_at", 0))[-1500:])
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temp = self.path.with_suffix(".tmp")
+                temp.write_text(json.dumps(self.entries, separators=(",", ":")), encoding="utf-8")
+                temp.replace(self.path)
+            except OSError as err:
+                LOG.warning("Could not persist provider cache: %s", err)
+
+
+provider_cache = ProviderCache(DATA_DIR / "provider-cache.json")
 
 
 class ProviderError(Exception):
@@ -175,7 +271,8 @@ def fetch_birds(location: dict, timezone_name: str) -> dict:
             "facet": "speciesKey", "facetLimit": 500, "limit": 0,
         })
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    # Keep the first uncached lookup burst gentle for GBIF's public search API.
+    with ThreadPoolExecutor(max_workers=2) as pool:
         payloads = list(pool.map(query_year, range(1, 6)))
     records: dict[str, dict] = {}
     years_with_data = 0
@@ -192,7 +289,7 @@ def fetch_birds(location: dict, timezone_name: str) -> dict:
             rec["years_reported"] += 1
     ranked = sorted(records.values(), key=lambda item: (-item["years_reported"], -item["records"]))
     shown = ranked[:12]
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         details = list(pool.map(lambda species: http_json(
             f"https://api.gbif.org/v1/species/{species['taxon_key']}"), shown))
     for species, detail in zip(shown, details):
@@ -767,22 +864,29 @@ class ReportService:
         self.store, self.cache_seconds = store, cache_seconds
         self.cache: dict[str, tuple[float, dict]] = {}
         self.lock = Lock()
+        self.build_locks: dict[str, Lock] = {}
 
     def report(self, location_id: str, refresh: bool = False) -> dict | None:
         location = self.store.get(location_id)
         if not location:
             return None
         import time as monotonic_time
-        now_tick = monotonic_time.monotonic()
+        requested_at = monotonic_time.monotonic()
         with self.lock:
-            cached = self.cache.get(location_id)
-            if cached and not refresh and now_tick - cached[0] < self.cache_seconds:
-                cached[1]["location"] = location
-                return cached[1]
-        report = self._build(location)
-        with self.lock:
-            self.cache[location_id] = (now_tick, report)
-        return report
+            build_lock = self.build_locks.setdefault(location_id, Lock())
+        # Coalesce simultaneous overview/report requests for the same location.
+        with build_lock:
+            now_tick = monotonic_time.monotonic()
+            with self.lock:
+                cached = self.cache.get(location_id)
+                cache_usable = cached and now_tick - cached[0] < self.cache_seconds
+                if cache_usable and (not refresh or cached[0] >= requested_at):
+                    cached[1]["location"] = location
+                    return cached[1]
+            report = self._build(location)
+            with self.lock:
+                self.cache[location_id] = (monotonic_time.monotonic(), report)
+            return report
 
     def invalidate(self, location_id: str) -> None:
         with self.lock:
