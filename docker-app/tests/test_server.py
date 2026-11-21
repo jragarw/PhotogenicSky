@@ -36,18 +36,20 @@ class SolarAndScoreTests(TestCase):
             events = []
             if offset == 0:
                 events = [
-                    {"type": "high", "height_m": 8.0, "time": (sunrise-timedelta(hours=2)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": sunrise.isoformat()},
                     {"type": "high", "height_m": 8.0, "time": (sunrise+timedelta(hours=2)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": sunset.isoformat()},
                     {"type": "high", "height_m": 8.0, "time": (sunset-timedelta(hours=3)).isoformat()},
-                    {"type": "high", "height_m": 8.0, "time": (sunset+timedelta(hours=3)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunrise-timedelta(minutes=1)).isoformat()},
+                    {"type": "high", "height_m": 8.0, "time": (sunset+timedelta(minutes=1)).isoformat()},
                     {"type": "high", "height_m": 8.0, "time": (sunrise+timedelta(hours=2, minutes=1)).isoformat()},
                 ]
             if offset == 13:
                 events.append({"type": "high", "height_m": 8.0,
-                               "time": (sunset+timedelta(hours=1)).isoformat()})
+                               "time": (sunset-timedelta(hours=1)).isoformat()})
             if offset == 14:
                 events.append({"type": "high", "height_m": 8.0,
-                               "time": (sunset+timedelta(hours=1)).isoformat()})
+                               "time": (sunset-timedelta(hours=1)).isoformat()})
             high_tides.extend(events)
             days.append({"date": day.isoformat(), "sunrise": sunrise.isoformat(),
                          "sunset": sunset.isoformat(), "tides": events})
@@ -56,6 +58,7 @@ class SolarAndScoreTests(TestCase):
         alerts = server.location_tide_alerts(report)
         self.assertEqual(len(alerts), 5)
         self.assertEqual([item["sun_event"] for item in alerts[:4]], ["sunrise", "sunrise", "sunset", "sunset"])
+        self.assertEqual([item["minutes_from_sun_event"] for item in alerts[:4]], [0, 120, 0, -180])
         self.assertTrue(all(item["date"] != days[14]["date"] for item in alerts))
 
     def test_tide_alerts_ignore_events_already_passed(self):
@@ -319,9 +322,9 @@ class HttpApiTests(TestCase):
         location = {"id": "coast", "name": "Coast", "latitude": 53.2, "longitude": -3.2,
                     "shoreline": True}
         report = {"location": location, "timezone": "Europe/London", "tides": {"status": "available", "events": [
-            {"type": "high", "height_m": 8.0, "time": f"{date_text}T16:30:00+00:00"}]}, "daily_summary": [{"date": date_text,
+            {"type": "high", "height_m": 8.0, "time": f"{date_text}T15:30:00+00:00"}]}, "daily_summary": [{"date": date_text,
             "sunrise": f"{date_text}T07:00", "sunset": f"{date_text}T16:00", "tides": [
-                {"type": "high", "height_m": 8.0, "time": f"{date_text}T16:30:00+00:00"}]}],
+                {"type": "high", "height_m": 8.0, "time": f"{date_text}T15:30:00+00:00"}]}],
             "scores": {}, "lighting": {}, "tide_range": {"minimum_m": 0.5, "maximum_m": 8.0}}
         with patch.object(server.STORE, "all", return_value=[location]), \
              patch.object(server.SERVICE, "report", return_value=report):

@@ -874,7 +874,7 @@ SERVICE = ReportService(STORE)
 
 
 def location_tide_alerts(report: dict) -> list[dict]:
-    """Find high tides at sunrise or within two hours, and sunset or within three."""
+    """Find high tides from sunrise through two hours after, and up to three hours before sunset."""
     if not report.get("location", {}).get("shoreline") or report.get("tides", {}).get("status") != "available":
         return []
     timezone_name = report.get("timezone", "UTC")
@@ -900,8 +900,8 @@ def location_tide_alerts(report: dict) -> list[dict]:
                 if target.astimezone(zone) < now:
                     continue
                 offset_minutes = (tide_time.astimezone(timezone.utc) - target.astimezone(timezone.utc)).total_seconds() / 60
-                window_minutes = 120 if label == "sunrise" else 180
-                if abs(offset_minutes) <= window_minutes:
+                in_window = (0 <= offset_minutes <= 120) if label == "sunrise" else (-180 <= offset_minutes <= 0)
+                if in_window:
                     relation = "at" if abs(offset_minutes) < 1 else f"{abs(round(offset_minutes))} min {'after' if offset_minutes > 0 else 'before'}"
                     height = f" · {float(event['height_m']):.1f} m" if event.get("height_m") is not None else ""
                     alerts.append({"type": "high_tide_near_sun", "date": day["date"], "time": tide_time.astimezone(zone).isoformat(),
